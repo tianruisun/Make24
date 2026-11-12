@@ -95,6 +95,10 @@
     eight: 8, ate: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
     seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20
   };
+  /* "twenty-four", "twenty four", "thirty six" (R3.1). A unit word that is also "to" / "too" is left out: "twenty to" is
+     not a number anyone says in a sum. */
+  const EN_TENS = { twenty: 20, thirty: 30, forty: 40, fourty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  const EN_UNIT = { one: 1, won: 1, two: 2, three: 3, tree: 3, four: 4, for: 4, fore: 4, five: 5, six: 6, seven: 7, eight: 8, ate: 8, nine: 9 };
   /* "three quarters" = 3 ÷ 4 (R1.2). */
   const EN_DENOM = { half: 2, halves: 2, third: 3, thirds: 3, quarter: 4, quarters: 4, fourth: 4, fourths: 4, fifth: 5, fifths: 5,
     sixth: 6, sixths: 6, seventh: 7, sevenths: 7, eighth: 8, eighths: 8, ninth: 9, ninths: 9, tenth: 10, tenths: 10 };
@@ -169,6 +173,11 @@
         const rank = CARD_WORD[cardKey];
         raw.push({ t: 'num', v: rankValue(rank, mode === 'nofaces' ? '13' : mode), card: rank });
         i += cardKey.length; continue;
+      }
+      if (w && EN_TENS[w[0]] != null) {
+        const u = /^[\s-]*([a-z]+)/.exec(s.slice(i + w[0].length));
+        if (u && EN_UNIT[u[1]] != null) { raw.push({ t: 'num', v: EN_TENS[w[0]] + EN_UNIT[u[1]] }); i += w[0].length + u[0].length; continue; }
+        raw.push({ t: 'num', v: EN_TENS[w[0]] }); i += w[0].length; continue;
       }
       if (w && EN_NUM[w[0]] != null) { raw.push({ t: 'num', v: EN_NUM[w[0]] }); i += w[0].length; continue; }
       if (w && EN_DENOM[w[0]] != null) { raw.push({ t: 'denom', v: EN_DENOM[w[0]] }); i += w[0].length; continue; }
@@ -282,7 +291,17 @@
   function check(text, values, mode = '13') {
     const steps = splitSteps(tokenize(text, mode).tokens);
     if (steps.length >= 2) return checkSteps(steps, values, String(text || ''));
-    const tokens = steps[0].tokens;
+    const r = checkOne(steps[0].tokens, values, text);
+    if (r.status !== 'cards') return r;
+    /* Only part of the cards ("九减六", "9减6等于3"): judged as a first step, so the app can say it is not finished and
+       what is left, or that the claimed result is wrong (R3.2, R3.3). A sum with a number that is no card stays 'cards'. */
+    const st = checkSteps(steps, values, String(text || ''));
+    if (steps[0].claim && (st.open || st.claimed != null)) return st;
+    /* No claim: still "use the four cards", but marked partial so the page keeps listening and can go on from it. */
+    if (st.open) { r.partial = true; r.left = st.left; }
+    return r;
+  }
+  function checkOne(tokens, values, text) {
     const nums = tokens.filter(t => t.t === 'num').map(t => t.v);
     if (!nums.length) return { status: 'unclear', heard: String(text || '') };
     const flat = tokens.filter(t => t.t === 'num' || t.t === 'op');
@@ -353,6 +372,8 @@
     return out;
   }
   function checkSteps(steps, values, heard) {
+    const original = steps;
+    steps = steps.map(x => ({ tokens: x.tokens, claim: x.claim }));
     const pool = values.map(v => frac(v));
     const done = [];
     const take = f => { const k = pool.findIndex(p => same(p, f)); if (k < 0) return false; pool.splice(k, 1); return true; };
@@ -368,13 +389,16 @@
       if (!tree || 'num' in tree) return { status: 'unclear', heard };
       let claim = st.claim ? evaluate(parse(joinFractions(st.claim))) : null;
       let value = evaluate(tree);
-      /* "等于三，三乘以八" can come back as "= 33 × 8": a claim that starts with the step's result is that result, and
-         its other digits start the next step. */
+      /* "等于三，三乘以八" can come back as "= 33 × 8": a claim that starts with the step's result, right before an
+         operator, may be that result with the next number run on. That reading is taken only if it makes the answer right, or
+         right so far (not finished yet); otherwise the claim stays as said and is reported (R3.6). */
       if (claim && value && claim.d === 1 && value.d === 1 && value.n > 0 && !same(claim, value) && st.claim.length === 1 &&
-          steps[s + 1] && String(claim.n).startsWith(String(value.n))) {
-        const next = steps[s + 1];
-        next.tokens = [{ t: 'num', v: +String(claim.n).slice(String(value.n).length) }].concat(next.tokens.filter((t, i) => !(i === 0 && t.prev)));
-        claim = value;
+          steps[s + 1] && steps[s + 1].tokens[0] && steps[s + 1].tokens[0].prev && String(claim.n).startsWith(String(value.n))) {
+        const alt = original.map(x => ({ tokens: x.tokens, claim: x.claim }));
+        alt[s] = { tokens: st.tokens, claim: [{ t: 'num', v: value.n }] };
+        alt[s + 1] = { tokens: [{ t: 'num', v: +String(claim.n).slice(String(value.n).length) }].concat(steps[s + 1].tokens.slice(1)), claim: steps[s + 1].claim };
+        const r = checkSteps(alt, values, heard);
+        if (r.status === 'correct' || r.open) return r;   // right, or right so far (the heard line shows the reading)
       }
       if (claim && !same(claim, value) && !said) {
         /* No brackets spoken in this step: accept a bracketing of the same order that gives the claimed result. */
@@ -396,7 +420,9 @@
       pool.push(value);
       prev = value;
     }
-    if (pool.length > 1) return { status: 'cards', heard, expr: shown(), steps: true };
+    /* Every step was right but more than one number is left: not finished yet. left: what is still on the table (cards not
+       used and results not used again), so the player can be told (R3.3). */
+    if (pool.length > 1) return { status: 'cards', heard, expr: shown(), steps: true, open: true, left: pool.map(fracText) };
     if (isTarget(pool[0])) return { status: 'correct', heard, expr: shown(), value: '24', steps: true };
     return { status: 'wrong', heard, expr: shown(), value: fracText(pool[0]), steps: true };
   }

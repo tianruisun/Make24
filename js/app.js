@@ -17,6 +17,7 @@
       micDenied: '没有麦克风权限，请用键盘', noSpeech: '没听到声音', micError: '听不到，请再试一次',
       kpUnclear: '算式没写完：检查运算符和括号',
       stepWrong: (v, c) => `这一步不对：结果是 ${v}，不是 ${c}`,
+      goOn: '🎤 接着说', notDone: '还没说完，请接着说', leftOpen: l => `还没算完：还剩 ${l}，请接着说`, and: '、',
       answerIs: '答案：', revealed: '下一手再来', bracketsAdded: '（已加上括号）', said: '听到：', scoreLabel: n => `答对 ${n} 题`,
       score: '成绩', resetScore: n => `清零（答对 ${n} 题）`, resetConfirm: n => `把答对的 ${n} 题清零？清零后不能恢复。`,
       voice: '语音', privacy: '听答案用的是浏览器自带的语音识别：Chrome 会把声音发给 Google，Safari 发给 Apple。',
@@ -31,8 +32,9 @@
       cardsIntro: 'Your cards: ', correct: 'Correct!', wrongIs: v => `Not quite, that makes ${v}`, wrongNone: 'Not quite, that cannot be worked out',
       useCards: c => `Use these four cards: ${c}`, unclear: "Sorry, I didn't catch that", noMic: 'This browser cannot listen. Use the keypad.',
       micDenied: 'No microphone permission. Use the keypad.', noSpeech: 'No speech heard', micError: 'Could not listen, please try again',
-      kpUnclear: 'Not a complete sum yet: check the operators and brackets',
+      kpUnclear: 'Not finished: check the signs',
       stepWrong: (v, c) => `That step makes ${v}, not ${c}`,
+      goOn: '🎤 Go on', notDone: 'Not finished yet: go on', leftOpen: l => `Not finished: ${l} still left. Go on`, and: ', ',
       answerIs: 'Answer: ', revealed: 'Try the next hand', bracketsAdded: '(brackets added)', said: 'Heard: ', scoreLabel: n => `${n} solved`,
       score: 'Score', resetScore: n => `Reset (${n} solved)`, resetConfirm: n => `Reset your ${n} solved to 0? This cannot be undone.`,
       voice: 'Voice', privacy: "Answers are heard by the browser's own speech recognition: Chrome sends the sound to Google, Safari to Apple.",
@@ -51,7 +53,7 @@
   if (!(stats.solved >= 0)) stats.solved = 0;
 
   const EMPTY = { heard: '', said: false, live: false, kind: '', parts: [] };
-  const state = { hand: null, done: false, listening: false, kp: [], view: EMPTY };
+  const state = { hand: null, done: false, listening: false, kp: [], view: EMPTY, partial: null };
   const T = () => STR[settings.lang];
   const voiceLang = () => settings.lang === 'zh' ? 'zh-CN' : (/^en/i.test(navigator.language || '') ? navigator.language : 'en-US');
 
@@ -101,10 +103,11 @@
 
   /* ---------- voice in ---------- */
   /* Listening goes on through pauses (continuous), so an answer can be said in steps: "9 减 6 等于 3 … 3 乘以 8 等于 24".
-     It stops when the player taps, when what was heard already makes 24, or after a quiet spell. What was heard so far is
-     judged when it stops, final or not: Safari often ends without marking its last result final. */
+     It stops when the player taps, when what was heard already makes 24, or after a quiet spell: 3.5 s, or 12 s while the
+     answer is right so far but not finished (R3.2). What was heard is judged when it stops, final or not: Safari often ends
+     without marking its last result final. An unfinished answer is kept (state.partial), so the next 🎤 goes on from it. */
   const Recognition = self.SpeechRecognition || self.webkitSpeechRecognition;
-  const QUIET_MS = 3500, DONE_MS = 700, NO_SPEECH_MS = 8000, MAX_MS = 45000;
+  const QUIET_MS = 3500, PAUSE_MS = 12000, DONE_MS = 700, NO_SPEECH_MS = 8000, MAX_MS = 45000;
   let rec = null;
   /* The recogniser's results → alternatives per piece. Chrome on Android may repeat the earlier pieces inside a later
      one; a piece that starts with the one before replaces it. */
@@ -119,16 +122,25 @@
     }
     return list;
   }
-  /* Texts to judge: the best guess of every piece, then each other guess of one piece with the best of the rest. */
+  /* Texts to judge, best guesses first. Every combination of the pieces' guesses while there are at most 125 (R3.5: two
+     pieces each heard wrong first); beyond that, each other guess of one piece with the best of the rest. */
+  const COMBOS = 125;
   function readings(list) {
     const best = list.map(a => a[0]);
+    if (list.reduce((n, a) => n * a.length, 1) <= COMBOS) {
+      let out = [[]];
+      for (const alts of list) out = out.flatMap(o => alts.map(a => o.concat(a)));
+      return out.map(o => o.join(' '));
+    }
     const out = [best.join(' ')];
     list.forEach((alts, i) => alts.slice(1).forEach(alt => out.push(best.map((b, j) => j === i ? alt : b).join(' '))));
     return out;
   }
+  /* Right so far but not finished: keep listening longer, and keep it to go on from. */
+  const unfinished = r => r.status === 'cards' && (r.open || r.partial);
   function listen() {
     if (!Recognition) { setMessage('info', [['noMic']]); openKeypad(); return; }
-    if (state.listening) { rec && rec.stop(); return; }
+    if (state.listening) { if (rec) { rec.tapped = true; rec.stop(); } return; }
     if (self.speechSynthesis) self.speechSynthesis.cancel();   // never listen to our own voice
     const me = rec = new Recognition();
     const hand = state.hand;
@@ -136,17 +148,27 @@
     rec.interimResults = true;
     rec.maxAlternatives = 5;
     rec.continuous = true;
+    const before = state.partial || [];
+    state.partial = null;
     let heard = [], timer = 0;
+    /* Going on from an unfinished answer: the old pieces and the new together, while that is right (so far); otherwise the
+       new alone (the player started again). */
+    const all = () => before.concat(heard);
+    const verdict = () => {
+      const v = hand.map(c => c.value), r = M.checkAny(readings(all()), v, settings.mode);
+      if (r.status === 'correct' || !before.length) return r;
+      const fresh = M.checkAny(readings(heard), v, settings.mode);
+      return fresh.status === 'correct' || !unfinished(r) ? fresh : r;
+    };
     const stopSoon = ms => { clearTimeout(timer); timer = setTimeout(() => { try { me.stop(); } catch (e) { /* already stopped */ } }, ms); };
     const maxTimer = setTimeout(() => stopSoon(0), MAX_MS);
     rec.onresult = e => {
       if (rec !== me) return;
       heard = pieces(e.results);
       if (!heard.length) return;
-      const texts = readings(heard);
-      setView({ heard: tidy(texts[0]), live: true });
-      const r = M.checkAny(texts, hand.map(c => c.value), settings.mode);
-      stopSoon(r.status === 'correct' ? DONE_MS : QUIET_MS);
+      setView({ heard: tidy(readings(all())[0]), live: true });
+      const r = verdict();
+      stopSoon(r.status === 'correct' ? DONE_MS : unfinished(r) ? PAUSE_MS : QUIET_MS);
     };
     rec.onerror = e => {
       if (rec !== me || e.error === 'aborted') return;
@@ -158,10 +180,13 @@
       if (rec !== me) return;
       rec = null;
       setListening(false);
-      if (heard.length && state.hand === hand) judge(readings(heard));
-      else if (!heard.length && !state.view.parts.length) setMessage('info', [['noSpeech']]);
+      if (state.hand !== hand) return;
+      if (heard.length) { judge(null, verdict(), { pieces: all(), tapped: !!me.tapped }); return; }
+      state.partial = before.length ? before : null;      // nothing new: the unfinished answer is still there to go on from
+      renderPrimary();
+      if (!state.view.parts.length) setMessage('info', [['noSpeech']]);
     };
-    try { rec.start(); setListening(true); setView({}); stopSoon(NO_SPEECH_MS); }
+    try { rec.start(); setListening(true); setView(before.length ? { heard: tidy(readings(before)[0]), live: true } : {}); stopSoon(NO_SPEECH_MS); }
     catch (e) { rec = null; clearTimeout(maxTimer); setListening(false); setMessage('info', [['micError']]); }
   }
   function setListening(on) {
@@ -171,10 +196,16 @@
 
   /* ---------- judging ---------- */
   /* checked: a verdict already worked out for these texts (the keypad's pre-check), so it is not worked out twice (R2.1). */
-  function judge(texts, checked) {
+  /* how: { pieces, tapped } when the answer came from the microphone. */
+  function judge(texts, checked, how = {}) {
     if (!state.hand || state.done) return null;
     const r = checked || M.checkAny(texts, state.hand.map(c => c.value), settings.mode);
-    if (r.status === 'correct') {
+    state.partial = unfinished(r) && how.pieces ? how.pieces : null;
+    if (unfinished(r) && (r.open || (how.pieces && !how.tapped))) {
+      /* R3.2 / R3.3: not "use the four cards" for an answer that is right so far: say it is not finished, and what is left. */
+      setView({ heard: r.expr });
+      sayParts('info', r.open ? [['leftOpen', () => r.left.join(T().and)]] : [['notDone']]);
+    } else if (r.status === 'correct') {
       state.done = true;
       stats.solved++;
       save('make24.stats', stats);
@@ -203,6 +234,7 @@
     state.hand = M.deal(settings.mode);
     state.done = false;
     state.kp = [];
+    state.partial = null;
     setView({});
     render();
     readCards();
@@ -299,7 +331,7 @@
   function renderPrimary() {
     const b = $('primaryBtn');
     b.classList.toggle('listening', state.listening);
-    b.textContent = !state.hand ? T().start : state.listening ? T().listening : state.done ? T().nextPrimary : T().listen;
+    b.textContent = !state.hand ? T().start : state.listening ? T().listening : state.done ? T().nextPrimary : state.partial ? T().goOn : T().listen;
   }
   function applyLanguage() {
     document.documentElement.lang = settings.lang === 'zh' ? 'zh-CN' : 'en';
@@ -334,7 +366,7 @@
     settings[i.name] = i.value;
     save('make24.settings', settings);
     applyLanguage();
-    if (changedMode && state.hand) { state.hand = null; state.done = false; state.kp = []; setView({}); render(); }
+    if (changedMode && state.hand) { state.hand = null; state.done = false; state.kp = []; state.partial = null; setView({}); render(); }
   });
   $('resetScore').addEventListener('click', () => {
     if (!stats.solved || !confirm(T().resetConfirm(stats.solved))) return;   // R1.6

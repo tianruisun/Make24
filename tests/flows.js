@@ -121,8 +121,8 @@ async function run(site) {
 
     let r = await say(page, '八除以三');
     check('zh: listens in zh-CN', (await page.evaluate(() => window.__recLang)) === 'zh-CN');
-    check('zh: too few cards → asks to use the four cards', r.verdict.startsWith('要用这四张牌') && r.kind.includes('wrong'), r);
-    check('zh: the reply is spoken', r.spoken[r.spoken.length - 1].startsWith('要用这四张牌'), r.spoken.slice(-1));
+    check('R3.2: part of the cards, and the recogniser stopped by itself → 还没说完，请接着说', r.verdict === '还没说完，请接着说' && r.primary === '🎤 接着说', r);
+    check('zh: the reply is spoken', r.spoken[r.spoken.length - 1] === '还没说完，请接着说', r.spoken.slice(-1));
 
     r = await say(page, '八加三加八加三');
     check('zh: wrong sum → 不对，结果是 22', r.verdict === '不对，结果是 22' && r.heard === '8 + 3 + 8 + 3 = 22', r);
@@ -260,7 +260,7 @@ async function run(site) {
     const readEn = await page.evaluate(() => window.__spoken[window.__spoken.length - 1].text);
     check('en: face cards read by name', readEn === 'Your cards: queen, king, 4, ace', readEn);
     r = await say(page, 'queen plus king plus four', '10 plus 10 plus 4');
-    check('en: with J Q K = 10, 10 + 10 + 4 is wrong (3 cards)', r.verdict.startsWith('Use these four cards'), r);
+    check('en: with J Q K = 10, 10 + 10 + 4 is not finished (3 cards)', r.verdict === 'Not finished yet: go on', r);
     r = await say(page, 'queen plus king plus four times ace');
     check('en: queen + king + 4 × ace = 24 when J Q K = 10', r.verdict === 'Correct!' && r.heard === '10 + 10 + 4 × 1 = 24', r);
     check('en: settings kept after reload', await (async () => { await page.reload(); return (await page.evaluate(() => localStorage.getItem('make24.settings'))).includes('"mode":"10"'); })());
@@ -356,6 +356,53 @@ async function run(site) {
     check('R3: a new hand while listening stops it, and nothing is judged on the new hand',
       !(await page.evaluate(() => window.Make24App.state.listening)) && (await text(page, '#verdict')) === '' && (await text(page, '#score')) === '✓ 3', await text(page, '#verdict'));
 
+    /* ---------- R4: findings of R3 ---------- */
+    const S = [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']];
+    await forceHand(page, S);
+    r = await play(page, [
+      { after: 100, results: [['9减6等于3']], final: true },
+      { after: 6000, results: [['9减6等于3'], ['3乘以8等于24，再乘以1等于24']], final: true }      // Hermes's 6-second pause
+    ]);
+    check('R3.2: a 6 s pause after a right first step → still listening → 对了', r.verdict === '对了！' && r.heard === '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24', r);
+
+    await forceHand(page, S);
+    r = await play(page, [{ after: 100, results: [['九减六']], final: false }], { tapAfter: 400 });
+    check('R3.2: part of the cards and a tap → 要用这四张牌 (the player said he was done)', r.verdict.startsWith('要用这四张牌'), r);
+    check('R3.2: … and the main button offers to go on: 🎤 接着说', (await text(page, '#primaryBtn')) === '🎤 接着说', await text(page, '#primaryBtn'));
+    r = await play(page, [{ after: 100, results: [['乘以八乘以一']], final: true }]);
+    check('R3.2: 接着说 "乘以八乘以一" goes on from "九减六" → 对了', r.verdict.startsWith('对了') && r.heard.startsWith('(9 − 6) × 8 × 1'), r);
+
+    await forceHand(page, S);
+    r = await play(page, [{ after: 100, results: [['9减6等于3']], final: true }], { tapAfter: 400 });
+    check('R3.2: a right first step then a tap → 还没算完：还剩 8、1、3，请接着说', r.verdict === '还没算完：还剩 8、1、3，请接着说' && r.heard === '9 − 6 = 3', r);
+    r = await play(page, [{ after: 100, results: [['3乘以8等于24，乘以1等于24']], final: true }]);
+    check('R3.2: and going on from it → 对了', r.verdict === '对了！' && r.heard === '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24', r);
+
+    await forceHand(page, S);
+    r = await play(page, [{ after: 100, results: [['9减6等于3']], final: true }], { tapAfter: 400 });
+    r = await play(page, [{ after: 100, results: [['九减六乘以八乘以一']], final: true }]);
+    check('R3.2: after 接着说 a whole new answer still counts (started again)', r.verdict.startsWith('对了'), r);
+
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['3', '♦']]);
+    r = await say(page, '9减6等于3，3乘以8等于24');
+    check('R3.3: Terry\'s sentence on 9 6 8 3 says what is left: 还没算完：还剩 3、24', r.verdict === '还没算完：还剩 3、24，请接着说', r);
+
+    await forceHand(page, S);
+    r = await play(page, [
+      { after: 100, results: [['九减六等于四', '九减六等于三']], final: true },
+      { after: 300, results: [['九减六等于四', '九减六等于三'], ['四乘八乘一等于二十四', '三乘八乘一等于二十四']], final: true }
+    ]);
+    check('R3.5: two pieces each heard wrong first: the right combination of guesses is found → 对了', r.verdict === '对了！', r);
+
+    await page.click('#langBtn');
+    await forceHand(page, S);
+    r = await say(page, 'nine plus six equals fifteen, fifteen plus eight plus one is twenty-four');
+    check('R3.1: English steps ending "is twenty-four" → Correct!', r.verdict === 'Correct!' && r.heard === '9 + 6 = 15; 15 + 8 + 1 = 24', r);
+    await forceHand(page, S);
+    r = await say(page, 'nine minus six equals three');
+    check('R3.3: English: Not finished: 8, 1, 3 still left. Go on', r.verdict === 'Not finished: 8, 1, 3 still left. Go on', r);
+    await page.click('#langBtn');
+
     check('R3: no page errors', errors.length === 0, errors);
     await context.close();
 
@@ -389,6 +436,18 @@ async function run(site) {
       const lines = await page.$eval('#kpMsg', el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
       check(`R2.2: ${w}×${h}: the keypad message fits on one line`, lines === 1, lines);
       await page.click('#keypad [data-k="clear"]');
+      await page.click('#keypad button[value="cancel"]');
+      await page.click('#langBtn');
+      await page.click('#keypadBtn');
+      await page.click('#kpCards button:nth-child(1)'); await page.click('#keypad [data-k="+"]');
+      for (let i = 2; i <= 4; i++) await page.click(`#kpCards button:nth-child(${i})`);
+      await page.click('#keypad [data-k="-"]'); await page.click('#kpCheck');
+      const enMsg = await page.$eval('#kpMsg', el => ({ text: el.textContent, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }));
+      check(`R3.4: ${w}×${h}: the English keypad message fits on one line too`, enMsg.lines === 1 && enMsg.text === 'Not finished: check the signs', enMsg);
+      await page.click('#keypad [data-k="clear"]');
+      await page.click('#keypad button[value="cancel"]');
+      await page.click('#langBtn');
+      await page.click('#keypadBtn');
       await page.click('#keypad button[value="cancel"]');
       await page.click('#settingsBtn');
       const st = await page.$eval('#settings', d => { const b = d.getBoundingClientRect(), ok = d.querySelector('button[value="ok"]').getBoundingClientRect();

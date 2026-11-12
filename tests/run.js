@@ -222,6 +222,50 @@ t('steps: no brackets spoken in a step, a bracketing gives the claimed result: 9
   const r = G.checkAny(['9减6乘8等于24，24乘1等于24'], S4);
   assert.strictEqual(r.status, 'correct', JSON.stringify(r));
 });
+/* ---------- R4: findings of R3 ---------- */
+t('R3.1: twenty-one … ninety-nine read as one number', () => {
+  assert.deepStrictEqual(['twenty-four', 'twenty four', 'thirty six', 'ninety-nine', 'twenty', 'forty'].map(w => G.tokenize(w).tokens.map(x => x.v)),
+    [[24], [24], [36], [99], [20], [40]]);
+});
+t('R3.1: "twenty to" is not 22', () => assert.deepStrictEqual(G.tokenize('twenty to').tokens.map(x => x.v), [20, 2]));
+stepCase('nine plus six equals fifteen, fifteen plus eight plus one is twenty-four', 'correct', '9 + 6 = 15; 15 + 8 + 1 = 24');
+stepCase('nine plus six equals fifteen, fifteen plus eight plus one is twenty four', 'correct', '9 + 6 = 15; 15 + 8 + 1 = 24');
+t('R3.3: Terry\'s sentence on 9 6 8 3 is not finished: 3 and 24 left', () => {
+  const r = G.checkAny(['9减6等于3，3乘以8等于24'], [9, 6, 8, 3]);
+  assert.deepStrictEqual([r.status, r.open, r.left], ['cards', true, ['3', '24']]);
+});
+t('R3.2: one right step with its result is not finished, with what is left', () => {
+  const r = G.checkAny(['9减6等于3'], S4);
+  assert.deepStrictEqual([r.status, r.open, r.left, r.expr], ['cards', true, ['8', '1', '3'], '9 − 6 = 3']);
+});
+t('R3.2: one wrong step with its result names the step', () => {
+  const r = G.checkAny(['9减6等于4'], S4);
+  assert.deepStrictEqual([r.status, r.value, r.claimed], ['wrong', '3', '4']);
+});
+t('R3.2: part of the cards with no result said is still "use the cards", marked partial', () => {
+  const r = G.checkAny(['九减六'], S4);
+  assert.deepStrictEqual([r.status, !!r.open, r.partial], ['cards', false, true]);
+});
+t('R3.2: a number that is no card is plain "use the cards" (not partial)', () => {
+  const r = G.checkAny(['九减五'], S4);
+  assert.deepStrictEqual([r.status, !!r.open, !!r.partial], ['cards', false, false]);
+});
+t('R3.2: a whole answer still reads as before: 8除以3减8除以3等于24 → correct, brackets added', () => {
+  const r = G.checkAny(['8除以3减8除以3等于24'], [8, 3, 8, 3]);
+  assert.deepStrictEqual([r.status, r.bracketsAdded], ['correct', true]);
+});
+t('R3.6: run together and right so far (9减6等于33×8等于24) → not finished, read as 3 and 3 × 8', () => {
+  const r = G.checkAny(['9减6等于33×8等于24'], S4);
+  assert.deepStrictEqual([r.status, r.open, r.expr], ['cards', true, '9 − 6 = 3; 3 × 8 = 24']);
+});
+t('R3.6: a claim whose split does not work stays as said and is reported: 9减6等于35乘以8 → claimed 35', () => {
+  const r = G.checkAny(['9减6等于35乘以8等于40'], S4);
+  assert.deepStrictEqual([r.status, r.value, r.claimed], ['wrong', '3', '35']);
+});
+t('R3.6: no split without an operator right after the claim: 9减6等于38，8乘1等于8 → claimed 38', () => {
+  const r = G.checkAny(['9减6等于38，8乘1等于8'], S4);
+  assert.deepStrictEqual([r.status, r.claimed], ['wrong', '38']);
+});
 t('splitSteps: one "= 24" at the end is one step (a plain answer)', () => assert.strictEqual(G.splitSteps(G.tokenize('8除以3减8除以3等于24').tokens).length, 1));
 t('sound-alikes: 成 → 乘, 酒 → 九, 扩号 → 括号, 剪 → 减', () => assert.strictEqual(G.soundAlike('酒剪六成扩号'), '九减六乘括号'));
 t('sound-alikes are a second reading: 九减六成八成一 → correct, heard shows what was said', () => {
