@@ -12,6 +12,9 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 ## Tech
 - Plain HTML/CSS/JS, no build step. Cloudflare build settings: preset None, no build command, output `/`.
 - Version lives in: `version.js` (also names the offline cache `make24-<version>`, and lists the Production hosts)
+- `js/game.js` holds the rules (decks, solver, exact fractions, reading a spoken answer) with no page, unit-tested in Node.
+- Voice: the browser's Web Speech API. speechSynthesis reads the cards; SpeechRecognition (Chrome: Google's service, Safari: Apple's) hears the answer. No server of our own, no key. Browsers without recognition (Firefox) use the keypad.
+- Saved in this browser only: `make24.settings` (language, deck) and `make24.stats` (hands solved).
 
 ## Tests
 - Run all: `npm test`
@@ -21,3 +24,7 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 ## Project rules (override the master rules)
 - Languages: 中文 (Mandarin) and English, for the screen and for the voice.
 - localStorage keys and cache names start with this app's own prefix (`make24`).
+- Same review process as Student_Practice (Terry, 2026-11-12 19:12: "Make this project, Make 24, the same as students'
+  practice project"): the shared auto-review loop, `node D:\VibeCodingProjects\_automation\review-now.js` after each
+  `R<n>`, and the standing decision of 2026-11-11 (only low findings left → push to Test). Production still needs Terry's
+  own "release to production".

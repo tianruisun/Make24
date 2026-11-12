@@ -1,0 +1,305 @@
+/* Make 24 rules, with no page: deck, dealing, solver, and reading a spoken or typed answer.
+   Loaded by the page (self.Make24) and by the unit tests in Node (require). All arithmetic is exact (fractions),
+   so 8 ÷ (3 − 8 ÷ 3) is exactly 24. */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.Make24 = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+  const TARGET = 24;
+
+  /* ---------- exact fractions ---------- */
+  const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) [a, b] = [b, a % b]; return a || 1; };
+  function frac(n, d = 1) {
+    if (d === 0) return null;
+    if (d < 0) { n = -n; d = -d; }
+    const g = gcd(n, d);
+    return { n: n / g, d: d / g };
+  }
+  function apply(op, a, b) {
+    if (!a || !b) return null;
+    switch (op) {
+      case '+': return frac(a.n * b.d + b.n * a.d, a.d * b.d);
+      case '-': return frac(a.n * b.d - b.n * a.d, a.d * b.d);
+      case '*': return frac(a.n * b.n, a.d * b.d);
+      case '/': return b.n === 0 ? null : frac(a.n * b.d, a.d * b.n);
+    }
+    return null;
+  }
+  const isTarget = f => !!f && f.d === 1 && f.n === TARGET;
+  const fracText = f => !f ? '' : f.d === 1 ? String(f.n) : `${f.n}/${f.d}`;
+
+  /* ---------- cards ---------- */
+  const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  const SUITS = ['♠', '♥', '♣', '♦'];
+  /* The three customs of rule 1: J Q K are 11 12 13, or all count 10, or are taken out. */
+  const DECK_MODES = ['13', '10', 'nofaces'];
+  function rankValue(rank, mode) {
+    const i = RANKS.indexOf(rank);
+    if (i < 0) return null;
+    if (i >= 10 && mode === '10') return 10;
+    if (i >= 10 && mode === 'nofaces') return null;
+    return i + 1;
+  }
+  function makeDeck(mode = '13') {
+    const deck = [];
+    for (const suit of SUITS) for (const rank of RANKS) {
+      const value = rankValue(rank, mode);
+      if (value != null) deck.push({ rank, suit, value });
+    }
+    return deck;
+  }
+
+  /* ---------- solver ---------- */
+  /* One way to make 24 from the numbers (each used once), as text with brackets, or null. */
+  function solve(values, target = TARGET) {
+    const items = values.map(v => ({ f: frac(v), s: String(v), p: 3 }));
+    const want = frac(target);
+    const OPS = [['+', 1], ['-', 1], ['*', 2], ['/', 2]];
+    const wrap = (x, need, right, op) => (x.p < need || (right && x.p === need && (op === '-' || op === '/'))) ? `(${x.s})` : x.s;
+    function rec(list) {
+      if (list.length === 1) return list[0].f && list[0].f.n === want.n && list[0].f.d === want.d ? list[0].s : null;
+      for (let i = 0; i < list.length; i++) for (let j = 0; j < list.length; j++) {
+        if (i === j) continue;
+        const rest = list.filter((_, k) => k !== i && k !== j);
+        for (const [op, p] of OPS) {
+          if ((op === '+' || op === '*') && j < i) continue;   // a+b = b+a
+          const f = apply(op, list[i].f, list[j].f);
+          if (!f) continue;
+          const s = `${wrap(list[i], p, false, op)} ${SYMBOL[op]} ${wrap(list[j], p, true, op)}`;
+          const r = rec(rest.concat({ f, s, p }));
+          if (r) return r;
+        }
+      }
+      return null;
+    }
+    return rec(items);
+  }
+  const SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+
+  /* Four cards whose values can make 24. rng() returns [0, 1). Gives up after many tries (never happens with real decks). */
+  function deal(mode = '13', rng = Math.random) {
+    const deck = makeDeck(mode);
+    for (let tries = 0; tries < 1000; tries++) {
+      const pool = deck.slice(), hand = [];
+      for (let k = 0; k < 4; k++) hand.push(pool.splice(Math.floor(rng() * pool.length), 1)[0]);
+      if (solve(hand.map(c => c.value))) return hand;
+    }
+    return null;
+  }
+
+  /* ---------- reading an answer ---------- */
+  const ZH_DIGIT = { '零': 0, '〇': 0, '一': 1, '幺': 1, '二': 2, '两': 2, '俩': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+  const EN_NUM = {
+    zero: 0, one: 1, won: 1, two: 2, to: 2, too: 2, three: 3, tree: 3, four: 4, for: 4, fore: 4, five: 5, six: 6, seven: 7,
+    eight: 8, ate: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+    seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20
+  };
+  /* "three quarters" = 3 ÷ 4 (R1.2). */
+  const EN_DENOM = { half: 2, halves: 2, third: 3, thirds: 3, quarter: 4, quarters: 4, fourth: 4, fourths: 4, fifth: 5, fifths: 5,
+    sixth: 6, sixths: 6, seventh: 7, sevenths: 7, eighth: 8, eighths: 8, ninth: 9, ninths: 9, tenth: 10, tenths: 10 };
+  const CARD_WORD = { a: 'A', ace: 'A', j: 'J', jack: 'J', q: 'Q', queen: 'Q', k: 'K', king: 'K', '尖': 'A', '勾': 'J', '圈': 'Q', '老k': 'K' };
+  /* Longest phrases first, so "divided by" wins over "by" and "左括号" over "括号". */
+  const PHRASES = [
+    ['multiplied by', '*'], ['divided by', '/'], ['divide by', '/'], ['open bracket', '('], ['open brackets', '('],
+    ['open parenthesis', '('], ['open paren', '('], ['left bracket', '('], ['left parenthesis', '('], ['bracket open', '('],
+    ['close bracket', ')'], ['close brackets', ')'], ['close parenthesis', ')'], ['close paren', ')'], ['right bracket', ')'],
+    ['right parenthesis', ')'], ['bracket close', ')'], ['end bracket', ')'], ['take away', '-'],
+    ['左括号', '('], ['前括号', '('], ['开括号', '('], ['括号开始', '('], ['右括号', ')'], ['后括号', ')'], ['反括号', ')'],
+    ['括号结束', ')'], ['关括号', ')'], ['分之', 'fracof'], ['乘以', '*'], ['乘上', '*'], ['除以', '/'], ['加上', '+'], ['减去', '-'], ['减掉', '-'],
+    ['括号', 'bracket'], ['加', '+'], ['减', '-'], ['乘', '*'], ['除', '/'],
+    ['plus', '+'], ['add', '+'], ['minus', '-'], ['subtract', '-'], ['times', '*'], ['multiply', '*'], ['over', '/'],
+    ['divide', '/'], ['bracket', 'bracket'], ['brackets', 'bracket'], ['parenthesis', 'bracket'], ['x', '*']
+  ];
+  const SYMBOLS = { '+': '+', '＋': '+', '-': '-', '−': '-', '–': '-', '—': '-', '－': '-', '*': '*', '×': '*', 'x': '*', '✕': '*', '·': '*',
+    '/': '/', '÷': '/', '／': '/', '(': '(', ')': ')', '（': '(', '）': ')', '[': '(', ']': ')', '【': '(', '】': ')', '{': '(', '}': ')' };
+  /* Everything after these is the result the player announces ("= 24", "等于二十四"), not part of the sum. */
+  const RESULT_WORDS = /(=|＝|等于|得到|结果是|\b(?:equals?|is|makes|gives|that's)\b)[^]*$/i;
+
+  /* Chinese numeral at s[i]: 1-99 ("十三", "二十", "三"). Returns [value, length] or null. */
+  function zhNumber(s, i) {
+    const a = ZH_DIGIT[s[i]], ten = s[i] === '十';
+    if (a == null && !ten) return null;
+    if (ten) { const b = ZH_DIGIT[s[i + 1]]; return b ? [10 + b, 2] : [10, 1]; }
+    if (s[i + 1] === '十') { const b = ZH_DIGIT[s[i + 2]]; return b ? [a * 10 + b, 3] : [a * 10, 2]; }
+    return [a, 1];
+  }
+
+  /* Text → tokens: {t:'num', v, card?}, {t:'op', v:'+-*\/'}, {t:'(' | ')', auto?}. Unknown words (fillers such as 嗯, "um",
+     "and") are skipped: a filler must not turn a right answer into "not heard". Brackets the app adds around a spoken
+     fraction carry auto: true, so they do not count as brackets the player said. */
+  function tokenize(text, mode = '13') {
+    let s = String(text || '').toLowerCase().replace(RESULT_WORDS, ' ').replace(/[，,。.、？?！!；;：:]/g, ' ');
+    const raw = [];
+    for (let i = 0; i < s.length;) {
+      const ch = s[i];
+      if (/\s/.test(ch)) { i++; continue; }
+      const d = /^\d+/.exec(s.slice(i));
+      if (d) { raw.push({ t: 'num', v: +d[0] }); i += d[0].length; continue; }
+      const p = PHRASES.find(([w]) => s.startsWith(w, i) && wordEdge(s, i, w));
+      if (p) {
+        if (p[1] === 'bracket' || p[1] === 'fracof') raw.push({ t: p[1] });
+        else if (p[1] === '(' || p[1] === ')') raw.push({ t: p[1] });
+        else raw.push({ t: 'op', v: p[1] });
+        i += p[0].length; continue;
+      }
+      if (SYMBOLS[ch] && !(ch === 'x' && !wordEdge(s, i, 'x'))) {
+        const v = SYMBOLS[ch];
+        raw.push(v === '(' || v === ')' ? { t: v } : { t: 'op', v }); i++; continue;
+      }
+      const zh = zhNumber(s, i);
+      if (zh) { raw.push({ t: 'num', v: zh[0] }); i += zh[1]; continue; }
+      const w = /^[a-z']+/.exec(s.slice(i));
+      const cardKey = w ? w[0] : (s.startsWith('老k', i) ? '老k' : CARD_WORD[ch] ? ch : null);
+      if (cardKey && CARD_WORD[cardKey]) {
+        const rank = CARD_WORD[cardKey];
+        raw.push({ t: 'num', v: rankValue(rank, mode === 'nofaces' ? '13' : mode), card: rank });
+        i += cardKey.length; continue;
+      }
+      if (w && EN_NUM[w[0]] != null) { raw.push({ t: 'num', v: EN_NUM[w[0]] }); i += w[0].length; continue; }
+      if (w && EN_DENOM[w[0]] != null) { raw.push({ t: 'denom', v: EN_DENOM[w[0]] }); i += w[0].length; continue; }
+      i += w ? w[0].length : 1;
+    }
+    /* Fractions: "四分之三" (4 分之 3) and "three quarters" (3, quarters) both become (3 ÷ 4). A 分之 or "quarters"
+       with no number on the side it needs is dropped, so the answer then has the wrong numbers and says so. */
+    const fr = [];
+    for (let k = 0; k < raw.length; k++) {
+      const tk = raw[k], prev = fr[fr.length - 1], next = raw[k + 1];
+      if (tk.t === 'fracof') {
+        if (prev && prev.t === 'num' && next && next.t === 'num') {
+          fr.pop();
+          fr.push({ t: '(', auto: true }, next, { t: 'op', v: '/' }, prev, { t: ')', auto: true });
+          k++;
+        }
+        continue;
+      }
+      if (tk.t === 'denom') {
+        if (prev && prev.t === 'num') { fr.pop(); fr.push({ t: '(', auto: true }, prev, { t: 'op', v: '/' }, { t: 'num', v: tk.v }, { t: ')', auto: true }); }
+        continue;
+      }
+      fr.push(tk);
+    }
+    /* A plain "括号" / "bracket" opens before a number or "(", and closes after a number or ")". */
+    const tokens = [];
+    for (let k = 0; k < fr.length; k++) {
+      const tk = fr[k];
+      if (tk.t !== 'bracket') { tokens.push(tk); continue; }
+      const prev = tokens[tokens.length - 1];
+      tokens.push({ t: prev && (prev.t === 'num' || prev.t === ')') ? ')' : '(' });
+    }
+    return { tokens };
+  }
+  /* A Latin word must stand alone ("x" in "six" is not times); Chinese and symbols always do. */
+  function wordEdge(s, i, w) {
+    if (!/^[a-z]/.test(w)) return true;
+    const before = s[i - 1], after = s[i + w.length];
+    return !(before && /[a-z]/.test(before)) && !(after && /[a-z]/.test(after));
+  }
+
+  /* Tokens → expression tree with the usual order (× ÷ before + −). Returns a node or null if it does not read. */
+  function parse(tokens) {
+    let i = 0;
+    const peek = () => tokens[i];
+    function primary() {
+      const tk = peek();
+      if (!tk) return null;
+      if (tk.t === 'num') { i++; return { num: tk.v }; }
+      if (tk.t === '(') {
+        i++;
+        const e = sum();
+        if (!e) return null;
+        if (peek() && peek().t === ')') i++;   // a missing last ")" is forgiven: speech often drops it
+        return e;
+      }
+      return null;
+    }
+    function product() {
+      let left = primary();
+      while (left && peek() && peek().t === 'op' && (peek().v === '*' || peek().v === '/')) {
+        const op = tokens[i++].v, right = primary();
+        if (!right) return null;
+        left = { op, a: left, b: right };
+      }
+      return left;
+    }
+    function sum() {
+      let left = product();
+      while (left && peek() && peek().t === 'op' && (peek().v === '+' || peek().v === '-')) {
+        const op = tokens[i++].v, right = product();
+        if (!right) return null;
+        left = { op, a: left, b: right };
+      }
+      return left;
+    }
+    const tree = sum();
+    return tree && i === tokens.length ? tree : null;
+  }
+  function evaluate(node) {
+    if (!node) return null;
+    if ('num' in node) return frac(node.num);
+    return apply(node.op, evaluate(node.a), evaluate(node.b));
+  }
+  const PREC = { '+': 1, '-': 1, '*': 2, '/': 2 };
+  function show(node, parentPrec = 0, right = false, parentOp = '') {
+    if ('num' in node) return String(node.num);
+    const p = PREC[node.op];
+    const s = `${show(node.a, p, false, node.op)} ${SYMBOL[node.op]} ${show(node.b, p, true, node.op)}`;
+    const need = p < parentPrec || (right && p === parentPrec && (parentOp === '-' || parentOp === '/'));
+    return need ? `(${s})` : s;
+  }
+  const numbersOf = node => 'num' in node ? [node.num] : numbersOf(node.a).concat(numbersOf(node.b));
+
+  /* Every way to put brackets into "n op n op n op n", keeping the spoken order. */
+  function bracketings(nums, ops) {
+    if (nums.length === 1) return [{ num: nums[0] }];
+    const out = [];
+    for (let k = 0; k < ops.length; k++) {
+      for (const a of bracketings(nums.slice(0, k + 1), ops.slice(0, k)))
+        for (const b of bracketings(nums.slice(k + 1), ops.slice(k + 1))) out.push({ op: ops[k], a, b });
+    }
+    return out;
+  }
+
+  const sameNumbers = (a, b) => a.length === b.length && a.slice().sort((x, y) => x - y).join() === b.slice().sort((x, y) => x - y).join();
+
+  /* Judges one answer for these card values.
+     status: 'correct' | 'wrong' (reads, uses the cards, not 24) | 'cards' (wrong numbers) | 'unclear' (does not read).
+     expr: the answer as the app understood it, with brackets; value: what it comes to. */
+  function check(text, values, mode = '13') {
+    const { tokens } = tokenize(text, mode);
+    const nums = tokens.filter(t => t.t === 'num').map(t => t.v);
+    if (!nums.length) return { status: 'unclear', heard: String(text || '') };
+    const flat = tokens.filter(t => t.t === 'num' || t.t === 'op');
+    let hasBrackets = tokens.some(t => (t.t === '(' || t.t === ')') && !t.auto);
+    let tree = parse(tokens);
+    if (!tree && hasBrackets) { tree = parse(flat); hasBrackets = false; }   // brackets that do not pair up are ignored
+    if (!tree) return { status: 'unclear', heard: String(text || ''), numbers: nums };
+    const used = numbersOf(tree);
+    if (!sameNumbers(used, values)) return { status: 'cards', heard: String(text || ''), numbers: used, expr: show(tree) };
+    let value = evaluate(tree);
+    if (isTarget(value)) return { status: 'correct', expr: show(tree), value: fracText(value) };
+    if (!hasBrackets) {
+      /* No brackets spoken: the player may have meant them. Accept if some bracketing of the same order makes 24. */
+      const ns = flat.filter(t => t.t === 'num').map(t => t.v), os = flat.filter(t => t.t === 'op').map(t => t.v);
+      const hit = bracketings(ns, os).find(b => isTarget(evaluate(b)));
+      if (hit) return { status: 'correct', expr: show(hit), value: '24', bracketsAdded: true };
+    }
+    return { status: 'wrong', expr: show(tree), value: value ? fracText(value) : null };
+  }
+
+  /* The best verdict over the recogniser's alternatives: correct beats wrong beats cards beats unclear. */
+  function checkAny(texts, values, mode = '13') {
+    const rank = { correct: 0, wrong: 1, cards: 2, unclear: 3 };
+    let best = null;
+    for (const t of texts) {
+      const r = check(t, values, mode);
+      r.heard = String(t || '');
+      if (!best || rank[r.status] < rank[best.status]) best = r;
+      if (r.status === 'correct') break;
+    }
+    return best || { status: 'unclear', heard: '' };
+  }
+
+  return { TARGET, RANKS, SUITS, DECK_MODES, frac, apply, fracText, rankValue, makeDeck, solve, deal,
+    tokenize, parse, evaluate, show, bracketings, check, checkAny };
+});

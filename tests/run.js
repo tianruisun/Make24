@@ -19,5 +19,193 @@ t('sw.js caches every file the page loads', () => {
   }
 });
 
+/* ---------- game rules (js/game.js) ---------- */
+const G = require(path.join(ROOT, 'js', 'game.js'));
+const F = (n, d) => G.frac(n, d);
+
+t('fractions reduce: 6/8 = 3/4', () => assert.deepStrictEqual(F(6, 8), { n: 3, d: 4 }));
+t('fractions: negative sign moves to the top', () => assert.deepStrictEqual(F(3, -6), { n: -1, d: 2 }));
+t('8 ÷ (3 − 8 ÷ 3) is exactly 24', () => {
+  const v = G.apply('/', F(8), G.apply('-', F(3), G.apply('/', F(8), F(3))));
+  assert.deepStrictEqual(v, { n: 24, d: 1 });
+});
+t('dividing by zero gives no value', () => assert.strictEqual(G.apply('/', F(3), G.apply('-', F(2), F(2))), null));
+
+t('deck J Q K = 11 12 13: 52 cards, values 1-13, 4 of each', () => {
+  const d = G.makeDeck('13');
+  assert.strictEqual(d.length, 52);
+  for (let v = 1; v <= 13; v++) assert.strictEqual(d.filter(c => c.value === v).length, 4, String(v));
+});
+t('deck J Q K = 10: 52 cards, sixteen 10s', () => {
+  const d = G.makeDeck('10');
+  assert.strictEqual(d.length, 52);
+  assert.strictEqual(d.filter(c => c.value === 10).length, 16);
+  assert.ok(d.every(c => c.value <= 10));
+});
+t('deck without J Q K: 40 cards, A-10', () => {
+  const d = G.makeDeck('nofaces');
+  assert.strictEqual(d.length, 40);
+  assert.ok(d.every(c => !['J', 'Q', 'K'].includes(c.rank)));
+});
+t('A is 1 in every deck', () => { for (const m of G.DECK_MODES) assert.strictEqual(G.rankValue('A', m), 1); });
+t('every card in a deck is different', () => { const d = G.makeDeck('13'); assert.strictEqual(new Set(d.map(c => c.rank + c.suit)).size, 52); });
+
+/* Known hard hands and known impossible ones. */
+const solvable = [[8, 3, 8, 3], [5, 5, 5, 1], [3, 3, 7, 7], [1, 5, 5, 5], [4, 4, 10, 10], [1, 3, 4, 6], [6, 6, 6, 6], [13, 11, 1, 1], [1, 1, 1, 8], [12, 12, 12, 12]];
+const impossible = [[1, 1, 1, 1], [1, 1, 1, 2], [13, 13, 13, 13], [1, 1, 5, 9], [7, 7, 7, 7]];
+for (const h of solvable) t(`solver finds 24 for ${h}`, () => {
+  const s = G.solve(h);
+  assert.ok(s, 'no answer');
+  const r = G.check(s, h);
+  assert.strictEqual(r.status, 'correct', `${s} → ${JSON.stringify(r)}`);
+});
+for (const h of impossible) t(`solver says no answer for ${h}`, () => assert.strictEqual(G.solve(h), null));
+t('solver: 1362 of the 1820 hands from 1-13 can make 24 (the known count), and each answer it writes checks as correct', () => {
+  let n = 0, all = 0;
+  for (let a = 1; a <= 13; a++) for (let b = a; b <= 13; b++) for (let c = b; c <= 13; c++) for (let d = c; d <= 13; d++) {
+    all++;
+    const s = G.solve([a, b, c, d]);
+    if (s) { n++; if (G.check(s, [a, b, c, d]).status !== 'correct') throw new Error(`${s} for ${[a, b, c, d]} does not check`); }
+  }
+  assert.strictEqual(all, 1820);
+  assert.strictEqual(n, 1362);
+});
+
+let seed = 1;
+const rng = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+for (const m of G.DECK_MODES) t(`deal (${m}): 300 hands, 4 different cards, each can make 24`, () => {
+  const deck = G.makeDeck(m).map(c => c.rank + c.suit);
+  for (let i = 0; i < 300; i++) {
+    const h = G.deal(m, rng);
+    assert.strictEqual(h.length, 4);
+    assert.strictEqual(new Set(h.map(c => c.rank + c.suit)).size, 4);
+    assert.ok(h.every(c => deck.includes(c.rank + c.suit)));
+    assert.ok(G.solve(h.map(c => c.value)), JSON.stringify(h));
+  }
+});
+
+/* ---------- reading answers: [what was heard, card values, expected status, expected expression] ---------- */
+const H = [8, 3, 8, 3];
+const answers = [
+  // symbols, as recognisers often write them
+  ['8÷(3-8÷3)', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['8/(3-8/3)', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['8 ÷ （3 − 8 ÷ 3）', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['8÷(3-8÷3)=24', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  // Chinese words
+  ['八除以括号三减八除以三括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['八除以左括号三减去八除以三右括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['八除以括号三减八除以三', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],                 // last ")" not said
+  ['八除以三减八除以三', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],                     // no brackets: the order allows them
+  ['八除以括号三减八除以三括号等于二十四', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['八加三加八加三', H, 'wrong', '8 + 3 + 8 + 3'],
+  ['八乘三', H, 'cards', '8 × 3'],
+  ['十三加十一加一减一', [13, 11, 1, 1], 'correct', '13 + 11 + 1 − 1'],
+  ['十二乘两除以一乘一', [12, 2, 1, 1], 'correct', '12 × 2 ÷ 1 × 1'],
+  ['K加J加A减A', [13, 11, 1, 1], 'correct', '13 + 11 + 1 − 1'],
+  ['老K加勾加尖减尖', [13, 11, 1, 1], 'correct', '13 + 11 + 1 − 1'],
+  ['括号一加二加三括号乘四', [1, 2, 3, 4], 'correct', '(1 + 2 + 3) × 4'],
+  ['一加二加三乘四', [1, 2, 3, 4], 'correct', '(1 + 2 + 3) × 4'],
+  ['六乘四，加一减一。', [6, 4, 1, 1], 'correct', '6 × 4 + 1 − 1'],
+  // English words
+  ['eight divided by open bracket three minus eight divided by three close bracket', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['eight over bracket three minus eight over three bracket', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['five times open paren five minus one over five', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['5 times 5 minus 1 divided by 5', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['open parenthesis 1 plus 2 plus 3 close parenthesis times 4', [1, 2, 3, 4], 'correct', '(1 + 2 + 3) × 4'],
+  ['six times four plus ace minus one', [6, 4, 1, 1], 'correct', '6 × 4 + 1 − 1'],
+  ['king plus jack plus 1 minus 1', [13, 11, 1, 1], 'correct', '13 + 11 + 1 − 1'],
+  ['6 x 4 x 1 x 1 equals 24', [6, 4, 1, 1], 'correct', '6 × 4 × 1 × 1'],
+  ['6 x 4 x 1 x 1 is 24', [6, 4, 1, 1], 'correct', '6 × 4 × 1 × 1'],
+  ['six times for times one times one', [6, 4, 1, 1], 'correct', '6 × 4 × 1 × 1'],   // "four" heard as "for"
+  ['ate times three times one times one', [8, 3, 1, 1], 'correct', '8 × 3 × 1 × 1'], // "eight" heard as "ate"
+  ['6 multiplied by 4 multiplied by 1 multiplied by 1', [6, 4, 1, 1], 'correct', '6 × 4 × 1 × 1'],
+  ['6 * 4 + 1 - 1', [6, 4, 1, 1], 'correct', '6 × 4 + 1 − 1'],
+  ['1 + 2 + 3 + 4', [1, 2, 3, 4], 'wrong', '1 + 2 + 3 + 4'],
+  // wrong cards, things that do not read
+  ['6 x 4', [6, 4, 1, 1], 'cards', '6 × 4'],
+  ['6 x 4 x 1 x 2', [6, 4, 1, 1], 'cards', '6 × 4 × 1 × 2'],
+  ['6 x 4 x 1 x 1 x 1', [6, 4, 1, 1], 'cards', '6 × 4 × 1 × 1 × 1'],
+  // fractions said the usual way (R1.2): 四分之三 and "three quarters" are 3 ÷ 4
+  ['六除以括号一减四分之三括号', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['6除以括号1减四分之三括号', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['六除以括号一减四分之三', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['六除以一减四分之三', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['八除以括号三减三分之八括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['八除以三减三分之八', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['six divided by open bracket one minus three quarters close bracket', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['six divided by one minus three quarters', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['five times five minus one fifth', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['5 times open bracket 5 minus a fifth close bracket', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['八除以四分之三', [8, 3, 4, 1], 'cards', '8 ÷ (3 ÷ 4)'],               // the fraction stays one group: 8 ÷ (3 ÷ 4)
+  ['三分之八加三分之八', H, 'wrong', '8 ÷ 3 + 8 ÷ 3'],
+  ['分之三', [1, 2, 3, 4], 'cards', '3'],                               // 分之 with nothing before it is dropped
+  // filler words are ignored, not "not heard"
+  ['嗯，八除以括号三减八除以三括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['um so six times four and then plus one minus one', [6, 4, 1, 1], 'correct', '6 × 4 + 1 − 1'],
+  ['1 2 3 4', [1, 2, 3, 4], 'unclear'],
+  ['hello there', [1, 2, 3, 4], 'unclear'],
+  ['', [1, 2, 3, 4], 'unclear'],
+  ['1 + + 2 3 4', [1, 2, 3, 4], 'unclear']
+];
+for (const [heard, vals, status, expr] of answers) t(`"${heard}" with ${vals} → ${status}`, () => {
+  const r = G.check(heard, vals);
+  assert.strictEqual(r.status, status, JSON.stringify(r));
+  if (expr) assert.strictEqual(r.expr, expr);
+});
+t('wrong answer reports what it makes (8+3+8+3 = 22)', () => assert.strictEqual(G.check('8+3+8+3', H).value, '22'));
+t('wrong answer with a fraction reports it (8 ÷ 3 + 8 − 3 = 23/3)', () => assert.strictEqual(G.check('8 ÷ 3 + 8 - 3', H).value, '23/3'));
+t('an answer that divides by zero is wrong, with no value', () => {
+  const r = G.check('8 ÷ (3 − 3) + 8', [8, 3, 3, 8]);
+  assert.deepStrictEqual([r.status, r.value], ['wrong', null]);
+});
+t('brackets added are flagged', () => {
+  assert.strictEqual(G.check('八除以三减八除以三', H).bracketsAdded, true);
+  assert.strictEqual(G.check('8÷(3-8÷3)', H).bracketsAdded, undefined);
+});
+t('spoken brackets are taken as said, not re-bracketed (8 ÷ 3 − (8 ÷ 3) is wrong)', () => {
+  assert.strictEqual(G.check('8 ÷ 3 − (8 ÷ 3)', H).status, 'wrong');
+});
+t('"six" is 6, not "s" + "i" + times', () => assert.deepStrictEqual(G.tokenize('six').tokens, [{ t: 'num', v: 6 }]));
+t('"x" between numbers is times', () => assert.deepStrictEqual(G.tokenize('8x3').tokens.map(t => t.v), [8, '*', 3]));
+t('"parenthesis" does not count as "is" (= the result)', () => assert.strictEqual(G.tokenize('open parenthesis 1').tokens.length, 2));
+t('Chinese numbers 1-20', () => {
+  const zh = '一 二 三 四 五 六 七 八 九 十 十一 十二 十三 十四 十五 十六 十七 十八 十九 二十'.split(' ');
+  zh.forEach((w, i) => assert.deepStrictEqual(G.tokenize(w).tokens, [{ t: 'num', v: i + 1 }], w));
+});
+t('J Q K by name follow the deck setting', () => {
+  assert.deepStrictEqual(G.tokenize('J Q K', '13').tokens.map(t => t.v), [11, 12, 13]);
+  assert.deepStrictEqual(G.tokenize('jack queen king', '10').tokens.map(t => t.v), [10, 10, 10]);
+});
+t('checkAny: a correct alternative wins over a wrong first one', () => {
+  const r = G.checkAny(['8 + 3 + 8 + 3', '8 ÷ (3 − 8 ÷ 3)'], H);
+  assert.deepStrictEqual([r.status, r.heard], ['correct', '8 ÷ (3 − 8 ÷ 3)']);
+});
+t('checkAny: with no correct one, a wrong sum beats unreadable text', () => {
+  assert.strictEqual(G.checkAny(['blah', '8 + 3 + 8 + 3'], H).status, 'wrong');
+});
+t('checkAny of nothing is unclear', () => assert.strictEqual(G.checkAny([], H).status, 'unclear'));
+t('a fraction\'s own brackets do not count as said: 六除以一减四分之三 is flagged bracketsAdded', () => {
+  assert.strictEqual(G.check('六除以一减四分之三', [6, 1, 3, 4]).bracketsAdded, true);
+  assert.strictEqual(G.check('六除以括号一减四分之三括号', [6, 1, 3, 4]).bracketsAdded, undefined);
+});
+t('"three quarters" reads as ( 3 ÷ 4 )', () => assert.deepStrictEqual(G.tokenize('three quarters').tokens.map(t => t.v || t.t), ['(', 3, '/', 4, ')']));
+
+/* ---------- home-screen icons (R1.5) ---------- */
+t('apple-touch-icon and the manifest PNG icons exist, are PNGs of the right size, and are cached', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/<link rel="apple-touch-icon" href="icons\/icon-180\.png">/.test(html));
+  const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const want = { 'icons/icon-180.png': 180, 'icons/icon-192.png': 192, 'icons/icon-512.png': 512 };
+  for (const src of ['icons/icon-192.png', 'icons/icon-512.png']) assert.ok(man.icons.some(i => i.src === src && i.type === 'image/png'), src);
+  for (const [f, n] of Object.entries(want)) {
+    const b = fs.readFileSync(path.join(ROOT, f));
+    assert.strictEqual(b.toString('latin1', 1, 4), 'PNG', f);
+    assert.deepStrictEqual([b.readUInt32BE(16), b.readUInt32BE(20)], [n, n], f);
+    assert.ok(sw.includes(`'./${f}'`), `${f} not in sw.js`);
+  }
+});
+
 console.log(`${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
