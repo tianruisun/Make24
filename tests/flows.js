@@ -374,7 +374,8 @@ async function run(site) {
 
     await forceHand(page, S);
     r = await play(page, [{ after: 100, results: [['9减6等于3']], final: true }], { tapAfter: 400 });
-    check('R3.2: a right first step then a tap → 还没算完：还剩 8、1、3，请接着说', r.verdict === '还没算完：还剩 8、1、3，请接着说' && r.heard === '9 − 6 = 3', r);
+    check('R3.2: a right first step then a tap → 还没算完：还剩 8、1、3 (R4.2: the button says 接着说)', r.verdict === '还没算完：还剩 8、1、3' && r.heard === '9 − 6 = 3', r);
+    check('R3.2: … and the main button is 🎤 接着说', (await text(page, '#primaryBtn')) === '🎤 接着说', await text(page, '#primaryBtn'));
     r = await play(page, [{ after: 100, results: [['3乘以8等于24，乘以1等于24']], final: true }]);
     check('R3.2: and going on from it → 对了', r.verdict === '对了！' && r.heard === '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24', r);
 
@@ -385,7 +386,8 @@ async function run(site) {
 
     await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['3', '♦']]);
     r = await say(page, '9减6等于3，3乘以8等于24');
-    check('R3.3: Terry\'s sentence on 9 6 8 3 says what is left: 还没算完：还剩 3、24', r.verdict === '还没算完：还剩 3、24，请接着说', r);
+    check('R4.3: Terry\'s sentence on 9 6 8 3 (3 and 24 left, which cannot make 24) → 四张牌要各用一次，请重新说一遍', r.verdict === '四张牌要各用一次，请重新说一遍' && r.heard === '9 − 6 = 3; 3 × 8 = 24', r);
+    check('R4.3: … and 接着说 is not offered', (await text(page, '#primaryBtn')) === '🎤 说答案', await text(page, '#primaryBtn'));
 
     await forceHand(page, S);
     r = await play(page, [
@@ -400,7 +402,13 @@ async function run(site) {
     check('R3.1: English steps ending "is twenty-four" → Correct!', r.verdict === 'Correct!' && r.heard === '9 + 6 = 15; 15 + 8 + 1 = 24', r);
     await forceHand(page, S);
     r = await say(page, 'nine minus six equals three');
-    check('R3.3: English: Not finished: 8, 1, 3 still left. Go on', r.verdict === 'Not finished: 8, 1, 3 still left. Go on', r);
+    check('R3.3: English: Not finished: 8, 1, 3 still left', r.verdict === 'Not finished: 8, 1, 3 still left', r);
+    await forceHand(page, [['Q', '♠'], ['8', '♥'], ['3', '♣'], ['A', '♦']]);
+    r = await say(page, 'twelve plus eight is twenty, three plus one is four, twenty plus four');
+    check('R4.1: "is twenty, three plus one is four" is not read as 23 → Correct!', r.verdict === 'Correct!' && r.heard === '12 + 8 = 20; 3 + 1 = 4; 20 + 4 = 24', r);
+    await forceHand(page, [['Q', '♠'], ['8', '♥'], ['3', '♣'], ['A', '♦']]);
+    r = await say(page, 'twelve plus eight is twenty three plus one is four twenty plus four');
+    check('R4.1: the same with no commas → Correct!', r.verdict === 'Correct!', r);
     await page.click('#langBtn');
 
     check('R3: no page errors', errors.length === 0, errors);
@@ -449,6 +457,15 @@ async function run(site) {
       await page.click('#langBtn');
       await page.click('#keypadBtn');
       await page.click('#keypad button[value="cancel"]');
+      for (const lang of ['zh', 'en']) {
+        /* R4.2: the longest likely not-finished line, three numbers left, all two digits (K J 10 10, 十三加十一等于二十四) */
+        await forceHand(page, [['K', '♠'], ['J', '♥'], ['10', '♣'], ['10', '♦']]);
+        await page.evaluate(() => window.Make24App.judge(['十三加十一等于二十四'], null, { pieces: [['十三加十一等于二十四']], tapped: true }));
+        const v = await page.$eval('#verdict', el => ({ text: el.textContent, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }));
+        const want = lang === 'zh' ? '还没算完：还剩 10、10、24' : 'Not finished: 10, 10, 24 still left';
+        check(`R4.2: ${w}×${h}: the not-finished line fits on one line (${lang})`, v.lines === 1 && v.text === want, v);
+        await page.click('#langBtn');
+      }
       await page.click('#settingsBtn');
       const st = await page.$eval('#settings', d => { const b = d.getBoundingClientRect(), ok = d.querySelector('button[value="ok"]').getBoundingClientRect();
         return { inside: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight, side: d.scrollWidth > d.clientWidth, ok: ok.height >= 44 && ok.top >= b.top && ok.bottom <= Math.min(b.bottom, innerHeight) }; });

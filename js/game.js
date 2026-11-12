@@ -53,7 +53,7 @@
   /* ---------- solver ---------- */
   /* One way to make 24 from the numbers (each used once), as text with brackets, or null. */
   function solve(values, target = TARGET) {
-    const items = values.map(v => ({ f: frac(v), s: String(v), p: 3 }));
+    const items = values.map(v => typeof v === 'object' ? { f: v, s: fracText(v), p: 3 } : { f: frac(v), s: String(v), p: 3 });
     const want = frac(target);
     const OPS = [['+', 1], ['-', 1], ['*', 2], ['/', 2]];
     const wrap = (x, need, right, op) => (x.p < need || (right && x.p === need && (op === '-' || op === '/'))) ? `(${x.s})` : x.s;
@@ -147,7 +147,8 @@
      "and") are skipped: a filler must not turn a right answer into "not heard". Brackets the app adds around a spoken
      fraction carry auto: true, so they do not count as brackets the player said. */
   function tokenize(text, mode = '13') {
-    let s = String(text || '').toLowerCase().replace(/[，,。.、？?！!；;：:]/g, ' ');
+    /* Punctuation becomes a mark (\u0001) that reads as nothing, but that "twenty, three" does not join across (R4.1). */
+    let s = String(text || '').toLowerCase().replace(/[，,。.、？?！!；;：:]/g, ' \u0001 ');
     const raw = [];
     for (let i = 0; i < s.length;) {
       const ch = s[i];
@@ -175,8 +176,12 @@
         i += cardKey.length; continue;
       }
       if (w && EN_TENS[w[0]] != null) {
-        const u = /^[\s-]*([a-z]+)/.exec(s.slice(i + w[0].length));
-        if (u && EN_UNIT[u[1]] != null) { raw.push({ t: 'num', v: EN_TENS[w[0]] + EN_UNIT[u[1]] }); i += w[0].length + u[0].length; continue; }
+        const u = /^[ \t-]*([a-z]+)/.exec(s.slice(i + w[0].length));
+        if (u && EN_UNIT[u[1]] != null) {
+          /* joined: the two words, so a step can also read them as a result and the start of the next step (R4.1) */
+          raw.push({ t: 'num', v: EN_TENS[w[0]] + EN_UNIT[u[1]], joined: [EN_TENS[w[0]], EN_UNIT[u[1]]] });
+          i += w[0].length + u[0].length; continue;
+        }
         raw.push({ t: 'num', v: EN_TENS[w[0]] }); i += w[0].length; continue;
       }
       if (w && EN_NUM[w[0]] != null) { raw.push({ t: 'num', v: EN_NUM[w[0]] }); i += w[0].length; continue; }
@@ -298,7 +303,7 @@
     const st = checkSteps(steps, values, String(text || ''));
     if (steps[0].claim && (st.open || st.claimed != null)) return st;
     /* No claim: still "use the four cards", but marked partial so the page keeps listening and can go on from it. */
-    if (st.open) { r.partial = true; r.left = st.left; }
+    if (st.open) { r.partial = true; r.left = st.left; r.canFinish = st.canFinish; }
     return r;
   }
   function checkOne(tokens, values, text) {
@@ -400,6 +405,16 @@
         const r = checkSteps(alt, values, heard);
         if (r.status === 'correct' || r.open) return r;   // right, or right so far (the heard line shows the reading)
       }
+      /* "is twenty three plus one is four" with no comma: "twenty three" may be the claim 20 and a next step starting with
+         3. Taken only if it makes the answer right, or right so far (R4.1, like the split above). */
+      if (claim && value && !same(claim, value) && st.claim.length === 1 && st.claim[0].joined && steps[s + 1]) {
+        const [tens, unit] = st.claim[0].joined;
+        const alt = original.map(x => ({ tokens: x.tokens, claim: x.claim }));
+        alt[s] = { tokens: st.tokens, claim: [{ t: 'num', v: tens }] };
+        alt[s + 1] = { tokens: [{ t: 'num', v: unit }].concat(steps[s + 1].tokens.filter((t, i) => !(i === 0 && t.prev))), claim: steps[s + 1].claim };
+        const r = checkSteps(alt, values, heard);
+        if (r.status === 'correct' || r.open) return r;
+      }
       if (claim && !same(claim, value) && !said) {
         /* No brackets spoken in this step: accept a bracketing of the same order that gives the claimed result. */
         const nodes = flat.filter(t => t.t === 'num').map(t => t.f ? { num: t.v, f: t.f, parts: t.parts } : { num: t.v });
@@ -422,7 +437,7 @@
     }
     /* Every step was right but more than one number is left: not finished yet. left: what is still on the table (cards not
        used and results not used again), so the player can be told (R3.3). */
-    if (pool.length > 1) return { status: 'cards', heard, expr: shown(), steps: true, open: true, left: pool.map(fracText) };
+    if (pool.length > 1) return { status: 'cards', heard, expr: shown(), steps: true, open: true, left: pool.map(fracText), canFinish: !!solve(pool) };
     if (isTarget(pool[0])) return { status: 'correct', heard, expr: shown(), value: '24', steps: true };
     return { status: 'wrong', heard, expr: shown(), value: fracText(pool[0]), steps: true };
   }

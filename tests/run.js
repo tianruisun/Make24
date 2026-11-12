@@ -266,6 +266,26 @@ t('R3.6: no split without an operator right after the claim: 9减6等于38，8�
   const r = G.checkAny(['9减6等于38，8乘1等于8'], S4);
   assert.deepStrictEqual([r.status, r.claimed], ['wrong', '38']);
 });
+/* ---------- R5: findings of R4 ---------- */
+stepCase('twelve plus eight is twenty, three plus one is four, twenty plus four', 'correct', '12 + 8 = 20; 3 + 1 = 4; 20 + 4 = 24', [12, 8, 3, 1]);
+stepCase('twelve plus eight is twenty, five minus one is four, twenty plus four', 'correct', '12 + 8 = 20; 5 − 1 = 4; 20 + 4 = 24', [12, 8, 5, 1]);
+stepCase('ten times three is thirty, two plus four is six, thirty minus six is twenty-four', 'correct', '10 × 3 = 30; 2 + 4 = 6; 30 − 6 = 24', [10, 3, 2, 4]);
+stepCase('twelve plus eight is twenty three plus one is four twenty plus four', 'correct', '12 + 8 = 20; 3 + 1 = 4; 20 + 4 = 24', [12, 8, 3, 1]);
+t('R4.1: a comma is a boundary: "twenty, three" is 20 and 3', () => assert.deepStrictEqual(G.tokenize('twenty, three').tokens.map(x => x.v), [20, 3]));
+t('R4.1: a joined claim that is simply wrong stays as said: twelve plus eight is twenty three → claimed 23', () => {
+  const r = G.checkAny(['twelve plus eight is twenty three'], [12, 8, 3, 1]);
+  assert.deepStrictEqual([r.status, r.claimed], ['wrong', '23']);
+});
+t('R4.3: 3 and 24 left cannot make 24: canFinish false', () => {
+  const r = G.checkAny(['9减6等于3，3乘以8等于24'], [9, 6, 8, 3]);
+  assert.deepStrictEqual([r.open, r.left, r.canFinish], [true, ['3', '24'], false]);
+});
+t('R4.3: 8, 1, 3 left can: canFinish true; 1 and 24 left can', () => {
+  assert.strictEqual(G.checkAny(['9减6等于3'], S4).canFinish, true);
+  assert.strictEqual(G.checkAny(['9减6等于3，3乘以8等于24'], S4).canFinish, true);
+});
+t('R4.3: part of the cards with no result: canFinish passed on', () => assert.strictEqual(G.checkAny(['九减六'], S4).canFinish, true));
+t('solve() takes fractions too: 1/3 and 8 → 8 ÷ 1/3', () => assert.ok(G.solve([G.frac(1, 3), G.frac(8)])));
 t('splitSteps: one "= 24" at the end is one step (a plain answer)', () => assert.strictEqual(G.splitSteps(G.tokenize('8除以3减8除以3等于24').tokens).length, 1));
 t('sound-alikes: 成 → 乘, 酒 → 九, 扩号 → 括号, 剪 → 减', () => assert.strictEqual(G.soundAlike('酒剪六成扩号'), '九减六乘括号'));
 t('sound-alikes are a second reading: 九减六成八成一 → correct, heard shows what was said', () => {
