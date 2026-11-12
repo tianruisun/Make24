@@ -286,6 +286,19 @@ t('R4.3: 8, 1, 3 left can: canFinish true; 1 and 24 left can', () => {
 });
 t('R4.3: part of the cards with no result: canFinish passed on', () => assert.strictEqual(G.checkAny(['九减六'], S4).canFinish, true));
 t('solve() takes fractions too: 1/3 and 8 → 8 ÷ 1/3', () => assert.ok(G.solve([G.frac(1, 3), G.frac(8)])));
+/* ---------- R6: a quick 减 heard as 点 or a decimal point (Terry, 2026-11-13) ---------- */
+stepCase('10点2等于88乘1等于8 8乘3等于24', 'correct', '10 − 2 = 8; 8 × 1 = 8; 8 × 3 = 24', [10, 2, 1, 3]);
+t('R6: Terry\'s text on K 2 A 3 with J Q K = 10 → correct, heard as said', () => {
+  const r = G.checkAny(['10点2等于88乘1等于8 8乘3等于24'], [10, 2, 1, 3], '10');
+  assert.deepStrictEqual([r.status, r.heard], ['correct', '10点2等于88乘1等于8 8乘3等于24']);
+});
+stepCase('10.7乘8乘1', 'correct', '(10 − 7) × 8 × 1', [10, 7, 8, 1]);
+stepCase('十点七乘八乘一', 'correct', '(10 − 7) × 8 × 1', [10, 7, 8, 1]);
+stepCase('10.7等于3，3乘8等于24，乘1等于24', 'correct', '10 − 7 = 3; 3 × 8 = 24; 24 × 1 = 24', [10, 7, 8, 1]);
+t('R6: 点 and "." are a second reading only: 10减7乘8乘1等于24点 is still correct', () =>
+  assert.strictEqual(G.checkAny(['10减7乘8乘1等于24点'], [10, 7, 8, 1]).status, 'correct'));
+t('R6: soundAlike: 10.7 → 10减7, 十点七 → 十减七, a sentence end "3。3" is left alone', () =>
+  assert.deepStrictEqual(['10.7', '十点七', '等于3。3乘8'].map(G.soundAlike), ['10减7', '十减七', '等于3。3乘8']));
 t('splitSteps: one "= 24" at the end is one step (a plain answer)', () => assert.strictEqual(G.splitSteps(G.tokenize('8除以3减8除以3等于24').tokens).length, 1));
 t('sound-alikes: 成 → 乘, 酒 → 九, 扩号 → 括号, 剪 → 减', () => assert.strictEqual(G.soundAlike('酒剪六成扩号'), '九减六乘括号'));
 t('sound-alikes are a second reading: 九减六成八成一 → correct, heard shows what was said', () => {

@@ -123,6 +123,8 @@
   /* Sound-alikes the recogniser writes for the words of a sum (成 for 乘, 酒 for 九). Tried as a second reading of what
      was heard, never instead of it, so a real word is still read the way it was heard. */
   const ZH_ALIKE = [
+    /* A quick 减 (jiǎn) comes back as 点 (diǎn): "十减二" → "10点2", or as a decimal point, "10.7" (Terry, 2026-11-13). */
+    [/(\d)[.．](?=\d)/g, '$1减'], [/点/g, '减'],
     [/[成城程称承呈]/g, '乘'], [/[出处储厨]/g, '除'], [/[家佳夹嘉]/g, '加'], [/[剪简检见件]/g, '减'],
     [/[扩阔刮过]号/g, '括号'], [/乘[已乙]/g, '乘以'], [/除[已乙]/g, '除以'], [/等[鱼余]/g, '等于'],
     [/[酒久]/g, '九'], [/[吧爸拔]/g, '八'], [/[溜]/g, '六'], [/[期器]/g, '七'], [/[山]/g, '三'], [/[儿尔]/g, '二'],

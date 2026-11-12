@@ -121,8 +121,8 @@ async function run(site) {
 
     let r = await say(page, '八除以三');
     check('zh: listens in zh-CN', (await page.evaluate(() => window.__recLang)) === 'zh-CN');
-    check('R3.2: part of the cards, and the recogniser stopped by itself → 还没说完，请接着说', r.verdict === '还没说完，请接着说' && r.primary === '🎤 接着说', r);
-    check('zh: the reply is spoken', r.spoken[r.spoken.length - 1] === '还没说完，请接着说', r.spoken.slice(-1));
+    check('R3.2: part of the cards, and the recogniser stopped by itself → 还没说完', r.verdict === '还没说完' && r.primary === '🎤 接着说', r);
+    check('zh: the reply is spoken', r.spoken[r.spoken.length - 1] === '还没说完', r.spoken.slice(-1));
 
     r = await say(page, '八加三加八加三');
     check('zh: wrong sum → 不对，结果是 22', r.verdict === '不对，结果是 22' && r.heard === '8 + 3 + 8 + 3 = 22', r);
@@ -260,7 +260,7 @@ async function run(site) {
     const readEn = await page.evaluate(() => window.__spoken[window.__spoken.length - 1].text);
     check('en: face cards read by name', readEn === 'Your cards: queen, king, 4, ace', readEn);
     r = await say(page, 'queen plus king plus four', '10 plus 10 plus 4');
-    check('en: with J Q K = 10, 10 + 10 + 4 is not finished (3 cards)', r.verdict === 'Not finished yet: go on', r);
+    check('en: with J Q K = 10, 10 + 10 + 4 is not finished (3 cards)', r.verdict === 'Not finished yet', r);
     r = await say(page, 'queen plus king plus four times ace');
     check('en: queen + king + 4 × ace = 24 when J Q K = 10', r.verdict === 'Correct!' && r.heard === '10 + 10 + 4 × 1 = 24', r);
     check('en: settings kept after reload', await (async () => { await page.reload(); return (await page.evaluate(() => localStorage.getItem('make24.settings'))).includes('"mode":"10"'); })());
@@ -386,7 +386,7 @@ async function run(site) {
 
     await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['3', '♦']]);
     r = await say(page, '9减6等于3，3乘以8等于24');
-    check('R4.3: Terry\'s sentence on 9 6 8 3 (3 and 24 left, which cannot make 24) → 四张牌要各用一次，请重新说一遍', r.verdict === '四张牌要各用一次，请重新说一遍' && r.heard === '9 − 6 = 3; 3 × 8 = 24', r);
+    check('R4.3: Terry\'s sentence on 9 6 8 3 (3 and 24 left, which cannot make 24) → 四张牌要各用一次，请重说', r.verdict === '四张牌要各用一次，请重说' && r.heard === '9 − 6 = 3; 3 × 8 = 24', r);
     check('R4.3: … and 接着说 is not offered', (await text(page, '#primaryBtn')) === '🎤 说答案', await text(page, '#primaryBtn'));
 
     await forceHand(page, S);
@@ -395,6 +395,16 @@ async function run(site) {
       { after: 300, results: [['九减六等于四', '九减六等于三'], ['四乘八乘一等于二十四', '三乘八乘一等于二十四']], final: true }
     ]);
     check('R3.5: two pieces each heard wrong first: the right combination of guesses is found → 对了', r.verdict === '对了！', r);
+
+    /* R6: what Apple's recogniser wrote for Terry (2026-11-13), on his hand K 2 A 3 with J Q K = 10 */
+    await page.evaluate(() => { window.Make24App.settings.mode = '10'; });
+    await forceHand(page, [['K', '♠'], ['2', '♥'], ['A', '♣'], ['3', '♦']]);
+    r = await say(page, '10点2等于88乘1等于8 8乘3等于24');
+    check('R6: "10点2等于88乘1等于8 8乘3等于24" (点 for a quick 减) → 对了', r.verdict === '对了！' && r.heard === '10 − 2 = 8; 8 × 1 = 8; 8 × 3 = 24', r);
+    await forceHand(page, [['K', '♠'], ['7', '♥'], ['8', '♣'], ['A', '♦']]);
+    r = await say(page, '10.7乘8乘1');
+    check('R6: "10.7乘8乘1" (a decimal point for 减) → 对了', r.verdict.startsWith('对了') && r.heard.startsWith('(10 − 7) × 8 × 1'), r);
+    await page.evaluate(() => { window.Make24App.settings.mode = '13'; });
 
     await page.click('#langBtn');
     await forceHand(page, S);
@@ -466,6 +476,11 @@ async function run(site) {
         check(`R4.2: ${w}×${h}: the not-finished line fits on one line (${lang})`, v.lines === 1 && v.text === want, v);
         await page.click('#langBtn');
       }
+      /* R5.1: the cannot-finish line (3 and 24 left) fits one line, 中文 */
+      await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['3', '♦']]);
+      await page.evaluate(() => window.Make24App.judge(['9减6等于3，3乘以8等于24'], null, { pieces: [['9减6等于3，3乘以8等于24']], tapped: true }));
+      const ac = await page.$eval('#verdict', el => ({ text: el.textContent, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }));
+      check(`R5.1: ${w}×${h}: 四张牌要各用一次，请重说 fits on one line`, ac.lines === 1 && ac.text === '四张牌要各用一次，请重说', ac);
       await page.click('#settingsBtn');
       const st = await page.$eval('#settings', d => { const b = d.getBoundingClientRect(), ok = d.querySelector('button[value="ok"]').getBoundingClientRect();
         return { inside: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight, side: d.scrollWidth > d.clientWidth, ok: ok.height >= 44 && ok.top >= b.top && ok.bottom <= Math.min(b.bottom, innerHeight) }; });
