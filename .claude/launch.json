@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "make24", "runtimeExecutable": "node", "runtimeArgs": ["-e", "const {fileFor,TYPES}=require('./tests/serve.js'),fs=require('fs'),p=require('path');require('http').createServer((q,r)=>{const f=fileFor(p.resolve('.'),new URL(q.url,'http://x').pathname);if(!f){r.writeHead(404);return r.end()}r.writeHead(200,{'content-type':TYPES[p.extname(f)]||'application/octet-stream'});r.end(fs.readFileSync(f))}).listen(5824,'127.0.0.1')"], "port": 5824 }
+  ]
+}

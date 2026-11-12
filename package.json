@@ -1,5 +1,5 @@
 {
-  "name": "terence-sun-make24",
+  "name": "make24",
   "private": true,
   "description": "Tests only. The app itself is plain HTML/CSS/JS with no build step.",
   "scripts": {

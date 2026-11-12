@@ -5,8 +5,8 @@ One-time setup: `npm install`. The browser suites use the installed Google Chrom
 | Command | What it runs |
 |---|---|
 | `npm test` | every suite against a local copy of this folder |
-| `npm test -- --site=https://test.terence-sun-make24.pages.dev` | the browser suites against the Test site (unit tests still run on the local code) |
-| `npm test -- --site=https://terence-sun-make24.pages.dev` | the same against Production |
+| `npm test -- --site=https://test.tianrui-make24.pages.dev` | the browser suites against the Test site (unit tests still run on the local code) |
+| `npm test -- --site=https://tianrui-make24.pages.dev` | the same against Production |
 
 Each run prints a count per suite and exits non-zero if anything failed.
 

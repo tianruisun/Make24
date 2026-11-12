@@ -8,7 +8,7 @@ function t(name, fn) { try { fn(); pass++; } catch (e) { fail++; console.log('FA
 const box = {};
 vm.runInNewContext(fs.readFileSync(path.join(ROOT, 'version.js'), 'utf8'), { self: box });
 t('version is X.Y.Z', () => assert.match(box.APP_VERSION, /^\d+\.\d+\.\d+$/));
-t('Production host listed', () => assert.ok(box.PRODUCTION_HOSTS.includes('terence-sun-make24.pages.dev')));
+t('Production host listed', () => assert.ok(box.PRODUCTION_HOSTS.includes('tianrui-make24.pages.dev')));
 t('sw.js caches every file the page loads', () => {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
