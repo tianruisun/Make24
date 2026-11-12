@@ -15,7 +15,7 @@
       cardsIntro: '四张牌：', correct: '对了！', wrongIs: v => `不对，结果是 ${v}`, wrongNone: '不对，这样算不出来',
       useCards: c => `要用这四张牌：${c}`, unclear: '没听清，请再说一遍', noMic: '这个浏览器不能听，请用键盘',
       micDenied: '没有麦克风权限，请用键盘', noSpeech: '没听到声音', micError: '听不到，请再试一次',
-      kpUnclear: '算式还没写完整：检查运算符和括号',
+      kpUnclear: '算式没写完：检查运算符和括号',
       stepWrong: (v, c) => `这一步不对：结果是 ${v}，不是 ${c}`,
       answerIs: '答案：', revealed: '下一手再来', bracketsAdded: '（已加上括号）', said: '听到：', scoreLabel: n => `答对 ${n} 题`,
       score: '成绩', resetScore: n => `清零（答对 ${n} 题）`, resetConfirm: n => `把答对的 ${n} 题清零？清零后不能恢复。`,
@@ -67,11 +67,13 @@
   function setMessage(kind, parts) { state.view = Object.assign({}, state.view, { kind, parts, live: false }); paint(); }
   function paint() {
     const v = state.view;
-    $('heard').textContent = (v.said && v.heard ? T().said : '') + v.heard;
+    $('heard').textContent = (v.said && v.heard ? T().said : '') + (v.said || v.live ? v.heard : minus(v.heard));
     $('heard').className = 'heard' + (v.live ? ' live' : '');
     $('verdict').className = 'verdict ' + v.kind;
-    $('verdict').textContent = msgText(v.parts);
+    $('verdict').textContent = minus(msgText(v.parts));
   }
+  /* A negative value is drawn with the same "−" as the sums ("= −6", "结果是 −6"); the voice still gets the plain text (R2.3). */
+  const minus = s => String(s).replace(/(^|[\s=：，])-(?=\d)/g, '$1−');
   /* Raw recogniser text, with the same × ÷ − the rest of the page uses (R1.8). */
   const tidy = s => String(s).replace(/\*/g, '×').replace(/\//g, '÷').replace(/(\d)\s*-\s*(?=\d)/g, '$1 − ');
 
@@ -168,9 +170,10 @@
   }
 
   /* ---------- judging ---------- */
-  function judge(texts) {
+  /* checked: a verdict already worked out for these texts (the keypad's pre-check), so it is not worked out twice (R2.1). */
+  function judge(texts, checked) {
     if (!state.hand || state.done) return null;
-    const r = M.checkAny(texts, state.hand.map(c => c.value), settings.mode);
+    const r = checked || M.checkAny(texts, state.hand.map(c => c.value), settings.mode);
     if (r.status === 'correct') {
       state.done = true;
       stats.solved++;
@@ -255,10 +258,12 @@
   /* A typed sum that does not read is not "not heard": say so in the keypad, keep it open and keep the sum (R1.1). */
   $('kpCheck').addEventListener('click', () => {
     const t = kpText();
-    if (M.check(t, state.hand.map(c => c.value), settings.mode).status === 'unclear') { $('kpMsg').textContent = T().kpUnclear; return; }
+    const r = M.check(t, state.hand.map(c => c.value), settings.mode);
+    if (r.status === 'unclear') { $('kpMsg').textContent = T().kpUnclear; return; }
+    r.heard = t;
     $('keypad').close();
     state.kp = [];
-    judge([t]);
+    judge([t], r);
   });
 
   /* ---------- drawing ---------- */

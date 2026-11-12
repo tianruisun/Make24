@@ -133,6 +133,9 @@ async function run(site) {
     await page.click('#langBtn');
     check('R1.4: and back to 中文', (await text(page, '#verdict')) === '不对，结果是 22', await text(page, '#verdict'));
 
+    r = await say(page, '8-3-8-3');
+    check('R2.3: a negative value is drawn with −: 8 − 3 − 8 − 3 = −6, 不对，结果是 −6', r.heard === '8 − 3 − 8 − 3 = −6' && r.verdict === '不对，结果是 −6', r);
+    check('R2.3: the voice gets the plain text', r.spoken[r.spoken.length - 1] === '不对，结果是 -6', r.spoken.slice(-1));
     r = await say(page, '');
     check('zh: an empty transcript → 没听到声音', r.verdict === '没听到声音', r);
     r = await say(page, '嗯');
@@ -200,7 +203,7 @@ async function run(site) {
     await page.click('#kpCheck');
     await page.waitForTimeout(80);
     check('R1.1: an unfinished sum keeps the keypad open', await page.$eval('#keypad', d => d.open));
-    check('R1.1: it says the sum is not complete', (await text(page, '#kpMsg')) === '算式还没写完整：检查运算符和括号', await text(page, '#kpMsg'));
+    check('R1.1: it says the sum is not complete', (await text(page, '#kpMsg')) === '算式没写完：检查运算符和括号', await text(page, '#kpMsg'));
     check('R1.1: the typed sum is kept', (await text(page, '#kpExpr')) === '+ 8 + 3 × 8 + 3 −', await text(page, '#kpExpr'));
     check('R1.1: the page verdict is not touched (no 没听清)', (await text(page, '#verdict')) === verdictBefore, await text(page, '#verdict'));
     await kp('back');
@@ -215,8 +218,10 @@ async function run(site) {
     check('zh: keypad shows 8 ÷ ( 3 − 8 ÷ 3 )', (await text(page, '#kpExpr')) === '8 ÷ ( 3 − 8 ÷ 3 )', await text(page, '#kpExpr'));
     await kp('back');
     check('zh: ⌫ removes the last key', (await text(page, '#kpExpr')) === '8 ÷ ( 3 − 8 ÷ 3', await text(page, '#kpExpr'));
+    await page.evaluate(() => { const M = window.Make24; window.__checks = 0; for (const k of ['check', 'checkAny']) { const fn = M[k]; M[k] = (...a) => (window.__checks++, fn(...a)); } });
     await page.click('#kpCheck');
     await page.waitForTimeout(80);
+    check('R2.1: 检查 works the typed sum out once', (await page.evaluate(() => window.__checks)) === 1, await page.evaluate(() => window.__checks));
     check('zh: keypad answer judged 对了 (missing ")" forgiven)', (await text(page, '#verdict')) === '对了！', await text(page, '#verdict'));
     check('zh: keypad closes after 检查', !(await page.$eval('#keypad', d => d.open)));
 
@@ -378,6 +383,12 @@ async function run(site) {
       await page.click('#keypadBtn');
       const kpFits = await page.$eval('#keypad', d => { const b = d.getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && b.bottom <= innerHeight; });
       check(`${w}×${h}: keypad fits the screen`, kpFits);
+      await page.click('#kpCards button:nth-child(1)'); await page.click('#keypad [data-k="+"]');
+      for (let i = 2; i <= 4; i++) await page.click(`#kpCards button:nth-child(${i})`);
+      await page.click('#keypad [data-k="-"]'); await page.click('#kpCheck');
+      const lines = await page.$eval('#kpMsg', el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+      check(`R2.2: ${w}×${h}: the keypad message fits on one line`, lines === 1, lines);
+      await page.click('#keypad [data-k="clear"]');
       await page.click('#keypad button[value="cancel"]');
       await page.click('#settingsBtn');
       const st = await page.$eval('#settings', d => { const b = d.getBoundingClientRect(), ok = d.querySelector('button[value="ok"]').getBoundingClientRect();
