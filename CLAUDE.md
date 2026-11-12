@@ -1,12 +1,13 @@
-# Terence_Sun_Make24
+# Make24 (folder Terence_Sun_Make24)
 
 Make 24 (24点): the classic Chinese card game. The phone deals and reads out four cards, the player says how to make
 24 with + − × ÷ and brackets, and the phone listens and says whether it is right.
 
 ## Environments
-- Production: https://terence-sun-make24.pages.dev   (branch main)
-- Test:       https://test.terence-sun-make24.pages.dev   (branch test)
-- Cloudflare Pages project name `terence-sun-make24` (not created yet: Terry does NEW_REPO_SETUP.md Part 2).
+- Production: https://tianrui-make24.pages.dev   (branch main)
+- Test:       https://test.tianrui-make24.pages.dev   (branch test)
+- Cloudflare Pages project name `tianrui-make24` (make24.pages.dev is taken). Not created yet: Terry does NEW_REPO_SETUP.md Part 2.
+- GitHub: https://github.com/tianruisun/Make24 (public). Local folder: D:VibeCodingProjectsTerence_Sun_Make24.
 
 ## Tech
 - Plain HTML/CSS/JS, no build step. Cloudflare build settings: preset None, no build command, output `/`.
@@ -14,7 +15,7 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 
 ## Tests
 - Run all: `npm test`
-- Run against Test site: `npm test -- --site=https://test.terence-sun-make24.pages.dev`
+- Run against Test site: `npm test -- --site=https://test.tianrui-make24.pages.dev`
 - Every run ends within its time limits (unit 5 min, smoke 3 min, flows 4 min, any single browser step 20 s).
 
 ## Project rules (override the master rules)
