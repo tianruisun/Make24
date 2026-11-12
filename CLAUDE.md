@@ -24,11 +24,7 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 ## Project rules (override the master rules)
 - Languages: 中文 (Mandarin) and English, for the screen and for the voice.
 - localStorage keys and cache names start with this app's own prefix (`make24`).
-- **Not in the shared auto-review loop** (Terry, 2026-11-12: "Manual, take it out of the loop"; marker file
-  `_Review\Terence_Sun_Make24_review\manual-review.txt`). After writing an `R<n>` block, do **not** run `review-now.js`.
-  Claude starts Hermes itself, outside the loop (Terry, 2026-11-12: "send the review to Hermes to review, okay? I'm not
-  going to review by hand"): `"%LOCALAPPDATA%\hermes\bin\hermes.exe" --in D:\VibeCodingProjects -z "Review changes in Terence_Sun_Make24"`,
-  in the background, output to `_automation\logs\<time>-Terence_Sun_Make24-hermes-direct.txt`. Commit before starting it,
-  and change nothing in the repo or the release file while it runs. Then read its FINDINGS and tell Terry.
-- The standing decision of 2026-11-11 (push to Test when only low findings are left) does **not** apply here. Test, like
-  Production, needs Terry's own "push to test" in the chat.
+- Same review process as Student_Practice (Terry, 2026-11-12 19:12: "Make this project, Make 24, the same as students'
+  practice project"): the shared auto-review loop, `node D:\VibeCodingProjects\_automation\review-now.js` after each
+  `R<n>`, and the standing decision of 2026-11-11 (only low findings left → push to Test). Production still needs Terry's
+  own "release to production".
