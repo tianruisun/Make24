@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Make 24 · 24点</title>
 <link rel="icon" href="icon.svg">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f5132">
 <link rel="stylesheet" href="css/app.css">
@@ -41,6 +42,7 @@
 <dialog id="keypad" class="sheet">
   <form method="dialog">
     <output id="kpExpr" class="kp-expr"></output>
+    <div id="kpMsg" class="kp-msg" role="alert"></div>
     <div id="kpCards" class="kp-cards"></div>
     <div class="kp-ops">
       <button type="button" data-k="+">+</button><button type="button" data-k="-">−</button>
@@ -69,6 +71,14 @@
       <label><input type="radio" name="mode" value="13"> <span data-i18n="mode13"></span></label>
       <label><input type="radio" name="mode" value="10"> <span data-i18n="mode10"></span></label>
       <label><input type="radio" name="mode" value="nofaces"> <span data-i18n="modeNo"></span></label>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="score"></legend>
+      <button id="resetScore" type="button" class="plain"></button>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="voice"></legend>
+      <p class="note" data-i18n="privacy"></p>
     </fieldset>
     <div class="row"><button value="ok" class="primary small" data-i18n="done"></button></div>
   </form>

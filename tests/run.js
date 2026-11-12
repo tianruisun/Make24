@@ -126,6 +126,23 @@ const answers = [
   ['6 x 4', [6, 4, 1, 1], 'cards', '6 × 4'],
   ['6 x 4 x 1 x 2', [6, 4, 1, 1], 'cards', '6 × 4 × 1 × 2'],
   ['6 x 4 x 1 x 1 x 1', [6, 4, 1, 1], 'cards', '6 × 4 × 1 × 1 × 1'],
+  // fractions said the usual way (R1.2): 四分之三 and "three quarters" are 3 ÷ 4
+  ['六除以括号一减四分之三括号', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['6除以括号1减四分之三括号', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['六除以括号一减四分之三', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['六除以一减四分之三', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['八除以括号三减三分之八括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['八除以三减三分之八', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['six divided by open bracket one minus three quarters close bracket', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['six divided by one minus three quarters', [6, 1, 3, 4], 'correct', '6 ÷ (1 − 3 ÷ 4)'],
+  ['five times five minus one fifth', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['5 times open bracket 5 minus a fifth close bracket', [5, 5, 1, 5], 'correct', '5 × (5 − 1 ÷ 5)'],
+  ['八除以四分之三', [8, 3, 4, 1], 'cards', '8 ÷ (3 ÷ 4)'],               // the fraction stays one group: 8 ÷ (3 ÷ 4)
+  ['三分之八加三分之八', H, 'wrong', '8 ÷ 3 + 8 ÷ 3'],
+  ['分之三', [1, 2, 3, 4], 'cards', '3'],                               // 分之 with nothing before it is dropped
+  // filler words are ignored, not "not heard"
+  ['嗯，八除以括号三减八除以三括号', H, 'correct', '8 ÷ (3 − 8 ÷ 3)'],
+  ['um so six times four and then plus one minus one', [6, 4, 1, 1], 'correct', '6 × 4 + 1 − 1'],
   ['1 2 3 4', [1, 2, 3, 4], 'unclear'],
   ['hello there', [1, 2, 3, 4], 'unclear'],
   ['', [1, 2, 3, 4], 'unclear'],
@@ -168,6 +185,27 @@ t('checkAny: with no correct one, a wrong sum beats unreadable text', () => {
   assert.strictEqual(G.checkAny(['blah', '8 + 3 + 8 + 3'], H).status, 'wrong');
 });
 t('checkAny of nothing is unclear', () => assert.strictEqual(G.checkAny([], H).status, 'unclear'));
+t('a fraction\'s own brackets do not count as said: 六除以一减四分之三 is flagged bracketsAdded', () => {
+  assert.strictEqual(G.check('六除以一减四分之三', [6, 1, 3, 4]).bracketsAdded, true);
+  assert.strictEqual(G.check('六除以括号一减四分之三括号', [6, 1, 3, 4]).bracketsAdded, undefined);
+});
+t('"three quarters" reads as ( 3 ÷ 4 )', () => assert.deepStrictEqual(G.tokenize('three quarters').tokens.map(t => t.v || t.t), ['(', 3, '/', 4, ')']));
+
+/* ---------- home-screen icons (R1.5) ---------- */
+t('apple-touch-icon and the manifest PNG icons exist, are PNGs of the right size, and are cached', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.ok(/<link rel="apple-touch-icon" href="icons\/icon-180\.png">/.test(html));
+  const man = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
+  const sw = fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8');
+  const want = { 'icons/icon-180.png': 180, 'icons/icon-192.png': 192, 'icons/icon-512.png': 512 };
+  for (const src of ['icons/icon-192.png', 'icons/icon-512.png']) assert.ok(man.icons.some(i => i.src === src && i.type === 'image/png'), src);
+  for (const [f, n] of Object.entries(want)) {
+    const b = fs.readFileSync(path.join(ROOT, f));
+    assert.strictEqual(b.toString('latin1', 1, 4), 'PNG', f);
+    assert.deepStrictEqual([b.readUInt32BE(16), b.readUInt32BE(20)], [n, n], f);
+    assert.ok(sw.includes(`'./${f}'`), `${f} not in sw.js`);
+  }
+});
 
 console.log(`${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;

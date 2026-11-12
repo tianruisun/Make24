@@ -112,9 +112,18 @@ async function run(site) {
     r = await say(page, '八加三加八加三');
     check('zh: wrong sum → 不对，结果是 22', r.verdict === '不对，结果是 22' && r.heard === '8 + 3 + 8 + 3 = 22', r);
     check('zh: no point for a wrong answer', r.score === '', r.score);
+    await page.click('#langBtn');
+    check('R1.4: switching to English re-says the verdict in English, the sum stays',
+      (await text(page, '#verdict')) === 'Not quite, that makes 22' && (await text(page, '#heard')) === '8 + 3 + 8 + 3 = 22', await text(page, '#verdict'));
+    await page.click('#langBtn');
+    check('R1.4: and back to 中文', (await text(page, '#verdict')) === '不对，结果是 22', await text(page, '#verdict'));
 
     r = await say(page, '');
     check('zh: nothing understood → 没听清', r.verdict === '没听清，请再说一遍', r);
+    r = await say(page, '8*3+');
+    check('R1.8: unreadable text is shown with × ÷ like the rest of the page', r.heard === '听到：8×3+' && r.verdict === '没听清，请再说一遍', r);
+    r = await say(page, '嗯，那个，八加三加八加三');
+    check('R1.7: filler words are ignored, the sum is still judged', r.verdict === '不对，结果是 22', r);
 
     await page.evaluate(() => { window.__nextError = 'no-speech'; });
     await page.click('#primaryBtn');
@@ -123,7 +132,9 @@ async function run(site) {
     await page.evaluate(() => { window.__nextError = 'not-allowed'; });
     await page.click('#primaryBtn');
     await page.waitForTimeout(150);
-    check('zh: microphone refused → 没有麦克风权限', (await text(page, '#verdict')) === '没有麦克风权限');
+    check('R1.3: microphone refused → 没有麦克风权限，请用键盘', (await text(page, '#verdict')) === '没有麦克风权限，请用键盘', await text(page, '#verdict'));
+    check('R1.3: microphone refused → the keypad opens', await page.$eval('#keypad', d => d.open));
+    await page.click('#keypad button[value="cancel"]');
 
     r = await say(page, '八除以括号三减八除以三括号');
     check('zh: spoken brackets, right answer → 对了', r.verdict === '对了！' && r.heard === '8 ÷ (3 − 8 ÷ 3) = 24', r);
@@ -166,6 +177,21 @@ async function run(site) {
     check('zh: 检查 off until all four cards are used', await page.$eval('#kpCheck', b => b.disabled));
     const kp = async k => page.click(`#keypad [data-k="${k}"]`);
     const kpCard = async i => page.click(`#kpCards button:nth-child(${i + 1})`);
+    /* R1.1: a typed sum that does not read stays, with a keypad message, not "没听清" */
+    const verdictBefore = await text(page, '#verdict');
+    await kp('+'); await kpCard(0); await kp('+'); await kpCard(1); await kp('*'); await kpCard(2); await kp('+'); await kpCard(3); await kp('-');
+    await page.click('#kpCheck');
+    await page.waitForTimeout(80);
+    check('R1.1: an unfinished sum keeps the keypad open', await page.$eval('#keypad', d => d.open));
+    check('R1.1: it says the sum is not complete', (await text(page, '#kpMsg')) === '算式还没写完整：检查运算符和括号', await text(page, '#kpMsg'));
+    check('R1.1: the typed sum is kept', (await text(page, '#kpExpr')) === '+ 8 + 3 × 8 + 3 −', await text(page, '#kpExpr'));
+    check('R1.1: the page verdict is not touched (no 没听清)', (await text(page, '#verdict')) === verdictBefore, await text(page, '#verdict'));
+    await kp('back');
+    check('R1.1: the message goes once the sum is changed', (await text(page, '#kpMsg')) === '');
+    await page.click('#keypad button[value="cancel"]');
+    await page.click('#keypadBtn');
+    check('R1.1: closing and reopening keeps the sum', (await text(page, '#kpExpr')) === '+ 8 + 3 × 8 + 3', await text(page, '#kpExpr'));
+    await kp('clear');
     await kpCard(0); await kp('/'); await kp('('); await kpCard(1); await kp('-'); await kpCard(2);
     check('zh: a used card cannot be used again', await page.$eval('#kpCards button:nth-child(1)', b => b.disabled));
     await kp('/'); await kpCard(3); await kp(')');
@@ -176,6 +202,23 @@ async function run(site) {
     await page.waitForTimeout(80);
     check('zh: keypad answer judged 对了 (missing ")" forgiven)', (await text(page, '#verdict')) === '对了！', await text(page, '#verdict'));
     check('zh: keypad closes after 检查', !(await page.$eval('#keypad', d => d.open)));
+
+    /* R1.6: the score can be reset, after a question that says it cannot be undone; R1.5: the settings say where the voice goes */
+    await page.click('#settingsBtn');
+    check('R1.6: reset shows the score', (await text(page, '#resetScore')) === '清零（答对 4 题）', await text(page, '#resetScore'));
+    check('R1.5: settings say Chrome sends the sound to Google', (await text(page, '#settings .note')).includes('Google'));
+    let asked = '';
+    page.once('dialog', d => { asked = d.message(); d.dismiss(); });
+    await page.click('#resetScore');
+    check('R1.6: reset asks first, with the consequence', asked === '把答对的 4 题清零？清零后不能恢复。', asked);
+    check('R1.6: Cancel keeps the score', (await text(page, '#score')) === '✓ 4', await text(page, '#score'));
+    page.once('dialog', d => d.accept());
+    await page.click('#resetScore');
+    await page.waitForTimeout(50);
+    check('R1.6: OK clears it, on screen and saved', (await text(page, '#score')) === '' && (await page.evaluate(() => localStorage.getItem('make24.stats'))) === '{"solved":0}');
+    check('R1.6: reset is off at 0', await page.$eval('#resetScore', b => b.disabled));
+    check('R1.5: apple-touch-icon is linked', !!(await page.$('link[rel="apple-touch-icon"][href="icons/icon-180.png"]')));
+    await page.click('#settings button[value="ok"]');
     check('zh: no page errors', errors.length === 0, errors);
     await context.close();
 
@@ -256,6 +299,13 @@ async function run(site) {
       await page.click('#keypadBtn');
       const kpFits = await page.$eval('#keypad', d => { const b = d.getBoundingClientRect(); return b.left >= 0 && b.right <= innerWidth && b.bottom <= innerHeight; });
       check(`${w}×${h}: keypad fits the screen`, kpFits);
+      await page.click('#keypad button[value="cancel"]');
+      await page.click('#settingsBtn');
+      const st = await page.$eval('#settings', d => { const b = d.getBoundingClientRect(), ok = d.querySelector('button[value="ok"]').getBoundingClientRect();
+        return { inside: b.left >= 0 && b.right <= innerWidth && b.top >= 0 && b.bottom <= innerHeight, side: d.scrollWidth > d.clientWidth, ok: ok.height >= 44 && ok.top >= b.top && ok.bottom <= Math.min(b.bottom, innerHeight) }; });
+      check(`${w}×${h}: settings fit the screen (scrolls inside if tall), Done always visible, no sideways scroll`, st.inside && !st.side && st.ok, st);
+      await page.screenshot({ path: path.join(SHOTS, `settings-${w}.png`) });
+      await page.click('#settings button[value="ok"]');
       await page.screenshot({ path: path.join(SHOTS, `size-${w}.png`) });
       await context.close();
     }

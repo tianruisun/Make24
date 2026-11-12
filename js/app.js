@@ -1,5 +1,6 @@
 /* Make 24 page: deals four cards, reads them out loud, listens to the answer and says whether it makes 24.
-   Rules live in game.js (self.Make24). Voice uses the browser's Web Speech API; without recognition the keypad is the way in. */
+   Rules live in game.js (self.Make24). Voice uses the browser's Web Speech API; without recognition the keypad is the way in.
+   What the result lines show is kept in state.view as message keys, not text, so a language change redraws it (R1.4). */
 (function () {
   'use strict';
   const M = self.Make24;
@@ -13,8 +14,11 @@
       backspace: '删除', clear: '清空', langBtn: 'EN', langLabel: 'English',
       cardsIntro: '四张牌：', correct: '对了！', wrongIs: v => `不对，结果是 ${v}`, wrongNone: '不对，这样算不出来',
       useCards: c => `要用这四张牌：${c}`, unclear: '没听清，请再说一遍', noMic: '这个浏览器不能听，请用键盘',
-      micDenied: '没有麦克风权限', noSpeech: '没听到声音', micError: '听不到，请再试一次',
+      micDenied: '没有麦克风权限，请用键盘', noSpeech: '没听到声音', micError: '听不到，请再试一次',
+      kpUnclear: '算式还没写完整：检查运算符和括号',
       answerIs: '答案：', revealed: '下一手再来', bracketsAdded: '（已加上括号）', said: '听到：', scoreLabel: n => `答对 ${n} 题`,
+      score: '成绩', resetScore: n => `清零（答对 ${n} 题）`, resetConfirm: n => `把答对的 ${n} 题清零？清零后不能恢复。`,
+      voice: '语音', privacy: '听答案用的是浏览器自带的语音识别：Chrome 会把声音发给 Google，Safari 发给 Apple。',
       suits: { '♠': '黑桃', '♥': '红桃', '♣': '梅花', '♦': '方块' },
       say: r => ({ A: 'A', J: 'J', Q: 'Q', K: 'K' }[r] || r), sep: '，', verbs: { '+': '加', '-': '减', '*': '乘', '/': '除以', '(': '括号', ')': '括号' }
     },
@@ -25,8 +29,11 @@
       backspace: 'Delete', clear: 'Clear', langBtn: '中', langLabel: '中文',
       cardsIntro: 'Your cards: ', correct: 'Correct!', wrongIs: v => `Not quite, that makes ${v}`, wrongNone: 'Not quite, that cannot be worked out',
       useCards: c => `Use these four cards: ${c}`, unclear: "Sorry, I didn't catch that", noMic: 'This browser cannot listen. Use the keypad.',
-      micDenied: 'No microphone permission', noSpeech: 'No speech heard', micError: 'Could not listen, please try again',
+      micDenied: 'No microphone permission. Use the keypad.', noSpeech: 'No speech heard', micError: 'Could not listen, please try again',
+      kpUnclear: 'Not a complete sum yet: check the operators and brackets',
       answerIs: 'Answer: ', revealed: 'Try the next hand', bracketsAdded: '(brackets added)', said: 'Heard: ', scoreLabel: n => `${n} solved`,
+      score: 'Score', resetScore: n => `Reset (${n} solved)`, resetConfirm: n => `Reset your ${n} solved to 0? This cannot be undone.`,
+      voice: 'Voice', privacy: "Answers are heard by the browser's own speech recognition: Chrome sends the sound to Google, Safari to Apple.",
       suits: { '♠': 'spades', '♥': 'hearts', '♣': 'clubs', '♦': 'diamonds' },
       say: r => ({ A: 'ace', J: 'jack', Q: 'queen', K: 'king' }[r] || r), sep: ', ', verbs: { '+': 'plus', '-': 'minus', '*': 'times', '/': 'divided by', '(': 'open bracket', ')': 'close bracket' }
     }
@@ -39,10 +46,32 @@
   if (!STR[settings.lang]) settings.lang = 'zh';
   if (!M.DECK_MODES.includes(settings.mode)) settings.mode = '13';
   const stats = Object.assign({ solved: 0 }, load('make24.stats', {}));
+  if (!(stats.solved >= 0)) stats.solved = 0;
 
-  const state = { hand: null, done: false, listening: false, kp: [] };
+  const EMPTY = { heard: '', said: false, live: false, kind: '', parts: [] };
+  const state = { hand: null, done: false, listening: false, kp: [], view: EMPTY };
   const T = () => STR[settings.lang];
   const voiceLang = () => settings.lang === 'zh' ? 'zh-CN' : (/^en/i.test(navigator.language || '') ? navigator.language : 'en-US');
+
+  /* ---------- the two result lines ---------- */
+  /* parts: [[key, ...args]]; an arg that is a function is called when drawn (card names follow the language). */
+  function msgText(parts) {
+    return parts.map(([k, ...a]) => {
+      const v = T()[k], args = a.map(x => typeof x === 'function' ? x() : x);
+      return typeof v === 'function' ? v(...args) : v;
+    }).join(' ');
+  }
+  function setView(view) { state.view = Object.assign({}, EMPTY, view); paint(); }
+  function setMessage(kind, parts) { state.view = Object.assign({}, state.view, { kind, parts, live: false }); paint(); }
+  function paint() {
+    const v = state.view;
+    $('heard').textContent = (v.said && v.heard ? T().said : '') + v.heard;
+    $('heard').className = 'heard' + (v.live ? ' live' : '');
+    $('verdict').className = 'verdict ' + v.kind;
+    $('verdict').textContent = msgText(v.parts);
+  }
+  /* Raw recogniser text, with the same × ÷ − the rest of the page uses (R1.8). */
+  const tidy = s => String(s).replace(/\*/g, '×').replace(/\//g, '÷').replace(/(\d)\s*-\s*(?=\d)/g, '$1 − ');
 
   /* ---------- voice out ---------- */
   function speak(text) {
@@ -62,14 +91,15 @@
       setTimeout(resolve, 12000);   // some browsers never fire onend
     });
   }
-  const cardWords = hand => hand.map(c => T().say(c.rank)).join(T().sep);
-  const readCards = () => state.hand && speak(T().cardsIntro + cardWords(state.hand));
+  const cardWords = () => state.hand ? state.hand.map(c => T().say(c.rank)).join(T().sep) : '';
+  const readCards = () => state.hand && speak(T().cardsIntro + cardWords());
+  function sayParts(kind, parts) { setMessage(kind, parts); speak(msgText(parts)); }
 
   /* ---------- voice in ---------- */
   const Recognition = self.SpeechRecognition || self.webkitSpeechRecognition;
   let rec = null;
   function listen() {
-    if (!Recognition) { showVerdict('info', T().noMic); openKeypad(); return; }
+    if (!Recognition) { setMessage('info', [['noMic']]); openKeypad(); return; }
     if (state.listening) { rec && rec.stop(); return; }
     if (self.speechSynthesis) self.speechSynthesis.cancel();   // never listen to our own voice
     rec = new Recognition();
@@ -82,18 +112,19 @@
       const r = e.results[e.results.length - 1];
       const texts = Array.from(r).map(a => a.transcript);
       if (r.isFinal) finalTexts = texts;
-      else { $('heard').textContent = texts[0]; $('heard').className = 'heard live'; }
+      else setView({ heard: tidy(texts[0]), live: true });
     };
     rec.onerror = e => {
-      const msg = e.error === 'not-allowed' || e.error === 'service-not-allowed' ? T().micDenied : e.error === 'no-speech' ? T().noSpeech : T().micError;
-      if (e.error !== 'aborted') showVerdict('info', msg);
+      if (e.error === 'aborted') return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { setMessage('info', [['micDenied']]); openKeypad(); return; }   // R1.3
+      setMessage('info', [[e.error === 'no-speech' ? 'noSpeech' : 'micError']]);
     };
     rec.onend = () => {
       setListening(false);
       if (finalTexts) judge(finalTexts);
     };
-    try { rec.start(); setListening(true); showVerdict('', ''); $('heard').textContent = ''; }
-    catch (e) { setListening(false); showVerdict('info', T().micError); }
+    try { rec.start(); setListening(true); setView({}); }
+    catch (e) { setListening(false); setMessage('info', [['micError']]); }
   }
   function setListening(on) {
     state.listening = on;
@@ -102,52 +133,43 @@
 
   /* ---------- judging ---------- */
   function judge(texts) {
-    if (!state.hand || state.done) return;
+    if (!state.hand || state.done) return null;
     const r = M.checkAny(texts, state.hand.map(c => c.value), settings.mode);
-    const heard = $('heard');
-    heard.className = 'heard';
     if (r.status === 'correct') {
-      heard.textContent = r.expr + ' = 24';
       state.done = true;
       stats.solved++;
       save('make24.stats', stats);
-      showVerdict('correct', T().correct + (r.bracketsAdded ? ' ' + T().bracketsAdded : ''));
+      setView({ heard: r.expr + ' = 24', kind: 'correct', parts: r.bracketsAdded ? [['correct'], ['bracketsAdded']] : [['correct']] });
       speak(T().correct);
     } else if (r.status === 'wrong') {
-      heard.textContent = r.expr + (r.value != null ? ' = ' + r.value : '');
-      const msg = r.value != null ? T().wrongIs(r.value) : T().wrongNone;
-      showVerdict('wrong', msg);
-      speak(msg);
+      setView({ heard: r.expr + (r.value != null ? ' = ' + r.value : '') });
+      sayParts('wrong', r.value != null ? [['wrongIs', r.value]] : [['wrongNone']]);
     } else if (r.status === 'cards') {
-      heard.textContent = r.expr;
-      const msg = T().useCards(cardWords(state.hand));
-      showVerdict('wrong', msg);
-      speak(msg);
+      setView({ heard: r.expr });
+      sayParts('wrong', [['useCards', cardWords]]);
     } else {
-      heard.textContent = r.heard ? T().said + r.heard : '';
-      showVerdict('wrong', T().unclear);
-      speak(T().unclear);
+      setView({ heard: r.heard ? tidy(r.heard) : '', said: true });
+      sayParts('wrong', [['unclear']]);
     }
     render();
+    return r;
   }
-  function showVerdict(kind, text) { const v = $('verdict'); v.className = 'verdict ' + kind; v.textContent = text; }
 
   /* ---------- dealing ---------- */
   function newHand() {
     if (rec && state.listening) rec.abort();
     state.hand = M.deal(settings.mode);
     state.done = false;
-    $('heard').textContent = ''; $('heard').className = 'heard';
-    showVerdict('', '');
+    state.kp = [];
+    setView({});
     render();
     readCards();
   }
   function showAnswer() {
     if (!state.hand) return;
     const s = M.solve(state.hand.map(c => c.value));
-    $('heard').textContent = s + ' = 24'; $('heard').className = 'heard';
     state.done = true;
-    showVerdict('info', T().revealed);
+    setView({ heard: s + ' = 24', kind: 'info', parts: [['revealed']] });
     speak(T().answerIs + spoken(s));
     render();
   }
@@ -158,9 +180,10 @@
   }
 
   /* ---------- keypad ---------- */
+  /* The typed sum stays until it is judged or a new hand is dealt, so closing and reopening keeps it (R1.1). */
   function openKeypad() {
     if (!state.hand || state.done) return;
-    state.kp = [];
+    $('kpMsg').textContent = '';
     renderKeypad();
     if (!$('keypad').open) $('keypad').showModal();
   }
@@ -177,7 +200,7 @@
       b.className = isRed(c) ? 'red' : '';
       b.setAttribute('aria-label', cardLabel(c));
       b.disabled = state.kp.includes(i);
-      b.onclick = () => { state.kp.push(i); renderKeypad(); };
+      b.onclick = () => { state.kp.push(i); $('kpMsg').textContent = ''; renderKeypad(); };
       box.appendChild(b);
     });
     $('kpCheck').disabled = state.kp.filter(k => typeof k === 'number').length !== 4;
@@ -187,9 +210,17 @@
     if (k === 'back') state.kp.pop();
     else if (k === 'clear') state.kp = [];
     else state.kp.push(k);
+    $('kpMsg').textContent = '';
     renderKeypad();
   }));
-  $('kpCheck').addEventListener('click', () => { const t = kpText(); $('keypad').close(); judge([t]); });
+  /* A typed sum that does not read is not "not heard": say so in the keypad, keep it open and keep the sum (R1.1). */
+  $('kpCheck').addEventListener('click', () => {
+    const t = kpText();
+    if (M.check(t, state.hand.map(c => c.value), settings.mode).status === 'unclear') { $('kpMsg').textContent = T().kpUnclear; return; }
+    $('keypad').close();
+    state.kp = [];
+    judge([t]);
+  });
 
   /* ---------- drawing ---------- */
   const isRed = c => c.suit === '♥' || c.suit === '♦';
@@ -216,6 +247,8 @@
     $('nextBtn').disabled = !has;
     $('score').textContent = stats.solved ? '✓ ' + stats.solved : '';
     $('score').setAttribute('aria-label', T().scoreLabel(stats.solved));
+    $('resetScore').textContent = T().resetScore(stats.solved);
+    $('resetScore').disabled = !stats.solved;
     renderPrimary();
   }
   const handKey = () => state.hand ? state.hand.map(c => c.rank + c.suit).join() + settings.lang : 'none' + settings.lang;
@@ -230,7 +263,10 @@
     document.querySelectorAll('[data-i18n-label]').forEach(el => el.setAttribute('aria-label', T()[el.dataset.i18nLabel]));
     $('langBtn').textContent = T().langBtn;
     $('langBtn').setAttribute('aria-label', T().langLabel);
+    if ($('kpMsg').textContent) $('kpMsg').textContent = T().kpUnclear;
+    paint();
     render();
+    if (state.hand && $('keypad').open) renderKeypad();
   }
 
   /* ---------- wiring ---------- */
@@ -254,7 +290,13 @@
     settings[i.name] = i.value;
     save('make24.settings', settings);
     applyLanguage();
-    if (changedMode && state.hand) { state.hand = null; state.done = false; $('heard').textContent = ''; showVerdict('', ''); render(); }
+    if (changedMode && state.hand) { state.hand = null; state.done = false; state.kp = []; setView({}); render(); }
+  });
+  $('resetScore').addEventListener('click', () => {
+    if (!stats.solved || !confirm(T().resetConfirm(stats.solved))) return;   // R1.6
+    stats.solved = 0;
+    save('make24.stats', stats);
+    render();
   });
 
   applyLanguage();

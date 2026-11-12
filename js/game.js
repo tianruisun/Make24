@@ -95,6 +95,9 @@
     eight: 8, ate: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
     seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20
   };
+  /* "three quarters" = 3 ÷ 4 (R1.2). */
+  const EN_DENOM = { half: 2, halves: 2, third: 3, thirds: 3, quarter: 4, quarters: 4, fourth: 4, fourths: 4, fifth: 5, fifths: 5,
+    sixth: 6, sixths: 6, seventh: 7, sevenths: 7, eighth: 8, eighths: 8, ninth: 9, ninths: 9, tenth: 10, tenths: 10 };
   const CARD_WORD = { a: 'A', ace: 'A', j: 'J', jack: 'J', q: 'Q', queen: 'Q', k: 'K', king: 'K', '尖': 'A', '勾': 'J', '圈': 'Q', '老k': 'K' };
   /* Longest phrases first, so "divided by" wins over "by" and "左括号" over "括号". */
   const PHRASES = [
@@ -103,7 +106,7 @@
     ['close bracket', ')'], ['close brackets', ')'], ['close parenthesis', ')'], ['close paren', ')'], ['right bracket', ')'],
     ['right parenthesis', ')'], ['bracket close', ')'], ['end bracket', ')'], ['take away', '-'],
     ['左括号', '('], ['前括号', '('], ['开括号', '('], ['括号开始', '('], ['右括号', ')'], ['后括号', ')'], ['反括号', ')'],
-    ['括号结束', ')'], ['关括号', ')'], ['乘以', '*'], ['乘上', '*'], ['除以', '/'], ['加上', '+'], ['减去', '-'], ['减掉', '-'],
+    ['括号结束', ')'], ['关括号', ')'], ['分之', 'fracof'], ['乘以', '*'], ['乘上', '*'], ['除以', '/'], ['加上', '+'], ['减去', '-'], ['减掉', '-'],
     ['括号', 'bracket'], ['加', '+'], ['减', '-'], ['乘', '*'], ['除', '/'],
     ['plus', '+'], ['add', '+'], ['minus', '-'], ['subtract', '-'], ['times', '*'], ['multiply', '*'], ['over', '/'],
     ['divide', '/'], ['bracket', 'bracket'], ['brackets', 'bracket'], ['parenthesis', 'bracket'], ['x', '*']
@@ -122,11 +125,12 @@
     return [a, 1];
   }
 
-  /* Text → tokens: {t:'num', v, card?}, {t:'op', v:'+-*\/'}, {t:'('}, {t:')'}. Unknown words are skipped and counted. */
+  /* Text → tokens: {t:'num', v, card?}, {t:'op', v:'+-*\/'}, {t:'(' | ')', auto?}. Unknown words (fillers such as 嗯, "um",
+     "and") are skipped: a filler must not turn a right answer into "not heard". Brackets the app adds around a spoken
+     fraction carry auto: true, so they do not count as brackets the player said. */
   function tokenize(text, mode = '13') {
     let s = String(text || '').toLowerCase().replace(RESULT_WORDS, ' ').replace(/[，,。.、？?！!；;：:]/g, ' ');
     const raw = [];
-    let skipped = 0;
     for (let i = 0; i < s.length;) {
       const ch = s[i];
       if (/\s/.test(ch)) { i++; continue; }
@@ -134,7 +138,7 @@
       if (d) { raw.push({ t: 'num', v: +d[0] }); i += d[0].length; continue; }
       const p = PHRASES.find(([w]) => s.startsWith(w, i) && wordEdge(s, i, w));
       if (p) {
-        if (p[1] === 'bracket') raw.push({ t: 'bracket' });
+        if (p[1] === 'bracket' || p[1] === 'fracof') raw.push({ t: p[1] });
         else if (p[1] === '(' || p[1] === ')') raw.push({ t: p[1] });
         else raw.push({ t: 'op', v: p[1] });
         i += p[0].length; continue;
@@ -153,18 +157,37 @@
         i += cardKey.length; continue;
       }
       if (w && EN_NUM[w[0]] != null) { raw.push({ t: 'num', v: EN_NUM[w[0]] }); i += w[0].length; continue; }
-      skipped++;
+      if (w && EN_DENOM[w[0]] != null) { raw.push({ t: 'denom', v: EN_DENOM[w[0]] }); i += w[0].length; continue; }
       i += w ? w[0].length : 1;
+    }
+    /* Fractions: "四分之三" (4 分之 3) and "three quarters" (3, quarters) both become (3 ÷ 4). A 分之 or "quarters"
+       with no number on the side it needs is dropped, so the answer then has the wrong numbers and says so. */
+    const fr = [];
+    for (let k = 0; k < raw.length; k++) {
+      const tk = raw[k], prev = fr[fr.length - 1], next = raw[k + 1];
+      if (tk.t === 'fracof') {
+        if (prev && prev.t === 'num' && next && next.t === 'num') {
+          fr.pop();
+          fr.push({ t: '(', auto: true }, next, { t: 'op', v: '/' }, prev, { t: ')', auto: true });
+          k++;
+        }
+        continue;
+      }
+      if (tk.t === 'denom') {
+        if (prev && prev.t === 'num') { fr.pop(); fr.push({ t: '(', auto: true }, prev, { t: 'op', v: '/' }, { t: 'num', v: tk.v }, { t: ')', auto: true }); }
+        continue;
+      }
+      fr.push(tk);
     }
     /* A plain "括号" / "bracket" opens before a number or "(", and closes after a number or ")". */
     const tokens = [];
-    for (let k = 0; k < raw.length; k++) {
-      const tk = raw[k];
+    for (let k = 0; k < fr.length; k++) {
+      const tk = fr[k];
       if (tk.t !== 'bracket') { tokens.push(tk); continue; }
       const prev = tokens[tokens.length - 1];
       tokens.push({ t: prev && (prev.t === 'num' || prev.t === ')') ? ')' : '(' });
     }
-    return { tokens, skipped };
+    return { tokens };
   }
   /* A Latin word must stand alone ("x" in "six" is not times); Chinese and symbols always do. */
   function wordEdge(s, i, w) {
@@ -247,7 +270,7 @@
     const nums = tokens.filter(t => t.t === 'num').map(t => t.v);
     if (!nums.length) return { status: 'unclear', heard: String(text || '') };
     const flat = tokens.filter(t => t.t === 'num' || t.t === 'op');
-    let hasBrackets = flat.length < tokens.length;
+    let hasBrackets = tokens.some(t => (t.t === '(' || t.t === ')') && !t.auto);
     let tree = parse(tokens);
     if (!tree && hasBrackets) { tree = parse(flat); hasBrackets = false; }   // brackets that do not pair up are ignored
     if (!tree) return { status: 'unclear', heard: String(text || ''), numbers: nums };
