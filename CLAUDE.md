@@ -11,6 +11,9 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 ## Tech
 - Plain HTML/CSS/JS, no build step. Cloudflare build settings: preset None, no build command, output `/`.
 - Version lives in: `version.js` (also names the offline cache `make24-<version>`, and lists the Production hosts)
+- `js/game.js` holds the rules (decks, solver, exact fractions, reading a spoken answer) with no page, unit-tested in Node.
+- Voice: the browser's Web Speech API. speechSynthesis reads the cards; SpeechRecognition (Chrome: Google's service, Safari: Apple's) hears the answer. No server of our own, no key. Browsers without recognition (Firefox) use the keypad.
+- Saved in this browser only: `make24.settings` (language, deck) and `make24.stats` (hands solved).
 
 ## Tests
 - Run all: `npm test`

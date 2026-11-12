@@ -3,7 +3,7 @@
    app's prefix are ever deleted. */
 importScripts('./version.js');
 const PREFIX = 'make24-', V = PREFIX + self.APP_VERSION;
-const F = ['./', './index.html', './version.js', './icon.svg', './manifest.webmanifest', './js/test-badge.js'];
+const F = ['./', './index.html', './version.js', './icon.svg', './manifest.webmanifest', './css/app.css', './js/test-badge.js', './js/game.js', './js/app.js'];
 self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(F)).then(() => self.skipWaiting())));
 self.addEventListener('activate', e => e.waitUntil(caches.keys()
   .then(k => Promise.all(k.filter(x => x.startsWith(PREFIX) && x !== V).map(x => caches.delete(x))))

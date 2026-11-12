@@ -7,11 +7,75 @@
 <link rel="icon" href="icon.svg">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#0f5132">
+<link rel="stylesheet" href="css/app.css">
 <script src="version.js"></script>
 </head>
-<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#0f5132;color:#fff;font:600 32px system-ui,sans-serif">
-<h1>24点</h1>
+<body>
+<header class="bar">
+  <h1>24<span>点</span></h1>
+  <span id="score" class="score" aria-live="polite"></span>
+  <button id="langBtn" class="icon-btn" type="button"></button>
+  <button id="settingsBtn" class="icon-btn" type="button" data-i18n-label="settings">⚙</button>
+</header>
+
+<main>
+  <section id="cards" class="cards" aria-live="polite"></section>
+
+  <section class="result" aria-live="polite">
+    <div id="heard" class="heard"></div>
+    <div id="verdict" class="verdict"></div>
+  </section>
+
+  <div class="primary-wrap">
+    <button id="primaryBtn" class="primary" type="button"></button>
+  </div>
+
+  <nav class="actions">
+    <button id="speakBtn" type="button"><span aria-hidden="true">🔊</span><span data-i18n="readAgain"></span></button>
+    <button id="keypadBtn" type="button"><span aria-hidden="true">⌨</span><span data-i18n="keypad"></span></button>
+    <button id="answerBtn" type="button"><span aria-hidden="true">💡</span><span data-i18n="answer"></span></button>
+    <button id="nextBtn" type="button"><span aria-hidden="true">➜</span><span data-i18n="next"></span></button>
+  </nav>
+</main>
+
+<dialog id="keypad" class="sheet">
+  <form method="dialog">
+    <output id="kpExpr" class="kp-expr"></output>
+    <div id="kpCards" class="kp-cards"></div>
+    <div class="kp-ops">
+      <button type="button" data-k="+">+</button><button type="button" data-k="-">−</button>
+      <button type="button" data-k="*">×</button><button type="button" data-k="/">÷</button>
+      <button type="button" data-k="(">(</button><button type="button" data-k=")">)</button>
+      <button type="button" data-k="back" data-i18n-label="backspace">⌫</button>
+      <button type="button" data-k="clear" data-i18n-label="clear">C</button>
+    </div>
+    <div class="row">
+      <button value="cancel" formnovalidate data-i18n="close"></button>
+      <button id="kpCheck" type="button" class="primary small" data-i18n="check"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settings" class="sheet">
+  <form method="dialog">
+    <h2 data-i18n="settings"></h2>
+    <fieldset>
+      <legend data-i18n="language"></legend>
+      <label><input type="radio" name="lang" value="zh"> 中文</label>
+      <label><input type="radio" name="lang" value="en"> English</label>
+    </fieldset>
+    <fieldset>
+      <legend data-i18n="faces"></legend>
+      <label><input type="radio" name="mode" value="13"> <span data-i18n="mode13"></span></label>
+      <label><input type="radio" name="mode" value="10"> <span data-i18n="mode10"></span></label>
+      <label><input type="radio" name="mode" value="nofaces"> <span data-i18n="modeNo"></span></label>
+    </fieldset>
+    <div class="row"><button value="ok" class="primary small" data-i18n="done"></button></div>
+  </form>
+</dialog>
+
 <script src="js/test-badge.js"></script>
-<script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
+<script src="js/game.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
