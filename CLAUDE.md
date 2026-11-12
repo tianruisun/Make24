@@ -24,3 +24,8 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 ## Project rules (override the master rules)
 - Languages: 中文 (Mandarin) and English, for the screen and for the voice.
 - localStorage keys and cache names start with this app's own prefix (`make24`).
+- **Reviewed by hand, not by the auto-review loop** (Terry, 2026-11-12: "Manual, take it out of the loop"; marker file
+  `_Review\Terence_Sun_Make24_review\manual-review.txt`). After writing an `R<n>` block, do **not** run `review-now.js`:
+  tell Terry the round is ready and that he asks Hermes "Review changes in Terence_Sun_Make24".
+- The standing decision of 2026-11-11 (push to Test when only low findings are left) does **not** apply here. Test, like
+  Production, needs Terry's own "push to test" in the chat.
