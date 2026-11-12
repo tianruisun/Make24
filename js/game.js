@@ -101,6 +101,9 @@
   const CARD_WORD = { a: 'A', ace: 'A', j: 'J', jack: 'J', q: 'Q', queen: 'Q', k: 'K', king: 'K', '尖': 'A', '勾': 'J', '圈': 'Q', '老k': 'K' };
   /* Longest phrases first, so "divided by" wins over "by" and "左括号" over "括号". */
   const PHRASES = [
+    /* "= 3", "等于三": the result of a step (or the final "= 24"). Kept as a separator so "9 − 6 = 3, 3 × 8 = 24" reads. */
+    ['结果是', 'eq'], ['等于', 'eq'], ['得到', 'eq'], ['得', 'eq'], ['equals', 'eq'], ['equal', 'eq'], ['makes', 'eq'],
+    ['gives', 'eq'], ["that's", 'eq'], ['is', 'eq'],
     ['multiplied by', '*'], ['divided by', '/'], ['divide by', '/'], ['open bracket', '('], ['open brackets', '('],
     ['open parenthesis', '('], ['open paren', '('], ['left bracket', '('], ['left parenthesis', '('], ['bracket open', '('],
     ['close bracket', ')'], ['close brackets', ')'], ['close parenthesis', ')'], ['close paren', ')'], ['right bracket', ')'],
@@ -111,10 +114,21 @@
     ['plus', '+'], ['add', '+'], ['minus', '-'], ['subtract', '-'], ['times', '*'], ['multiply', '*'], ['over', '/'],
     ['divide', '/'], ['bracket', 'bracket'], ['brackets', 'bracket'], ['parenthesis', 'bracket'], ['x', '*']
   ];
-  const SYMBOLS = { '+': '+', '＋': '+', '-': '-', '−': '-', '–': '-', '—': '-', '－': '-', '*': '*', '×': '*', 'x': '*', '✕': '*', '·': '*',
+  const SYMBOLS = { '=': 'eq', '＝': 'eq', '+': '+', '＋': '+', '-': '-', '−': '-', '–': '-', '—': '-', '－': '-', '*': '*', '×': '*', 'x': '*', '✕': '*', '·': '*',
     '/': '/', '÷': '/', '／': '/', '(': '(', ')': ')', '（': '(', '）': ')', '[': '(', ']': ')', '【': '(', '】': ')', '{': '(', '}': ')' };
-  /* Everything after these is the result the player announces ("= 24", "等于二十四"), not part of the sum. */
-  const RESULT_WORDS = /(=|＝|等于|得到|结果是|\b(?:equals?|is|makes|gives|that's)\b)[^]*$/i;
+  /* Sound-alikes the recogniser writes for the words of a sum (成 for 乘, 酒 for 九). Tried as a second reading of what
+     was heard, never instead of it, so a real word is still read the way it was heard. */
+  const ZH_ALIKE = [
+    [/[成城程称承呈]/g, '乘'], [/[出处储厨]/g, '除'], [/[家佳夹嘉]/g, '加'], [/[剪简检见件]/g, '减'],
+    [/[扩阔刮过]号/g, '括号'], [/乘[已乙]/g, '乘以'], [/除[已乙]/g, '除以'], [/等[鱼余]/g, '等于'],
+    [/[酒久]/g, '九'], [/[吧爸拔]/g, '八'], [/[溜]/g, '六'], [/[期器]/g, '七'], [/[山]/g, '三'], [/[儿尔]/g, '二'],
+    [/[武舞午]/g, '五'], [/[死似]/g, '四'], [/[依衣医]/g, '一']
+  ];
+  function soundAlike(text) {
+    let s = String(text || '');
+    for (const [re, w] of ZH_ALIKE) s = s.replace(re, w);
+    return s;
+  }
 
   /* Chinese numeral at s[i]: 1-99 ("十三", "二十", "三"). Returns [value, length] or null. */
   function zhNumber(s, i) {
@@ -129,7 +143,7 @@
      "and") are skipped: a filler must not turn a right answer into "not heard". Brackets the app adds around a spoken
      fraction carry auto: true, so they do not count as brackets the player said. */
   function tokenize(text, mode = '13') {
-    let s = String(text || '').toLowerCase().replace(RESULT_WORDS, ' ').replace(/[，,。.、？?！!；;：:]/g, ' ');
+    let s = String(text || '').toLowerCase().replace(/[，,。.、？?！!；;：:]/g, ' ');
     const raw = [];
     for (let i = 0; i < s.length;) {
       const ch = s[i];
@@ -138,14 +152,14 @@
       if (d) { raw.push({ t: 'num', v: +d[0] }); i += d[0].length; continue; }
       const p = PHRASES.find(([w]) => s.startsWith(w, i) && wordEdge(s, i, w));
       if (p) {
-        if (p[1] === 'bracket' || p[1] === 'fracof') raw.push({ t: p[1] });
+        if (p[1] === 'bracket' || p[1] === 'fracof' || p[1] === 'eq') raw.push({ t: p[1] });
         else if (p[1] === '(' || p[1] === ')') raw.push({ t: p[1] });
         else raw.push({ t: 'op', v: p[1] });
         i += p[0].length; continue;
       }
       if (SYMBOLS[ch] && !(ch === 'x' && !wordEdge(s, i, 'x'))) {
         const v = SYMBOLS[ch];
-        raw.push(v === '(' || v === ')' ? { t: v } : { t: 'op', v }); i++; continue;
+        raw.push(v === '(' || v === ')' || v === 'eq' ? { t: v } : { t: 'op', v }); i++; continue;
       }
       const zh = zhNumber(s, i);
       if (zh) { raw.push({ t: 'num', v: zh[0] }); i += zh[1]; continue; }
@@ -203,7 +217,7 @@
     function primary() {
       const tk = peek();
       if (!tk) return null;
-      if (tk.t === 'num') { i++; return { num: tk.v }; }
+      if (tk.t === 'num') { i++; return tk.f ? { num: tk.v, f: tk.f, parts: tk.parts } : { num: tk.v }; }
       if (tk.t === '(') {
         i++;
         const e = sum();
@@ -236,12 +250,12 @@
   }
   function evaluate(node) {
     if (!node) return null;
-    if ('num' in node) return frac(node.num);
+    if ('num' in node) return node.f || frac(node.num);
     return apply(node.op, evaluate(node.a), evaluate(node.b));
   }
   const PREC = { '+': 1, '-': 1, '*': 2, '/': 2 };
   function show(node, parentPrec = 0, right = false, parentOp = '') {
-    if ('num' in node) return String(node.num);
+    if ('num' in node) return node.parts ? `(${node.parts[0]} ÷ ${node.parts[1]})` : node.f ? fracText(node.f).replace('/', ' ÷ ') : String(node.num);
     const p = PREC[node.op];
     const s = `${show(node.a, p, false, node.op)} ${SYMBOL[node.op]} ${show(node.b, p, true, node.op)}`;
     const need = p < parentPrec || (right && p === parentPrec && (parentOp === '-' || parentOp === '/'));
@@ -266,7 +280,9 @@
      status: 'correct' | 'wrong' (reads, uses the cards, not 24) | 'cards' (wrong numbers) | 'unclear' (does not read).
      expr: the answer as the app understood it, with brackets; value: what it comes to. */
   function check(text, values, mode = '13') {
-    const { tokens } = tokenize(text, mode);
+    const steps = splitSteps(tokenize(text, mode).tokens);
+    if (steps.length >= 2) return checkSteps(steps, values, String(text || ''));
+    const tokens = steps[0].tokens;
     const nums = tokens.filter(t => t.t === 'num').map(t => t.v);
     if (!nums.length) return { status: 'unclear', heard: String(text || '') };
     const flat = tokens.filter(t => t.t === 'num' || t.t === 'op');
@@ -287,13 +303,113 @@
     return { status: 'wrong', expr: show(tree), value: value ? fracText(value) : null };
   }
 
+  /* ---------- an answer in steps: "9 − 6 = 3, 3 × 8 = 24" ----------
+     The tokens are cut at each "=" (等于, equals...). The number right after an "=" is the result the player claims for
+     the step before it; the rest starts the next step. A step that starts with an operator ("等于三，乘以八") goes on from
+     the last result. Returns [{tokens, claim: [tokens] | null}]: one entry means a plain answer, read as before. */
+  function splitSteps(tokens) {
+    const segs = [[]];
+    for (const tk of tokens) tk.t === 'eq' ? segs.push([]) : segs[segs.length - 1].push(tk);
+    const hasNum = seg => seg.some(t => t.t === 'num');
+    const hasOp = seg => seg.some(t => t.t === 'op');
+    const steps = [];
+    let pending = segs[0];
+    for (let k = 1; k < segs.length; k++) {
+      const seg = segs[k];
+      if (!hasNum(pending)) { pending = seg; continue; }        // "答案是 ...", "the answer is ..."
+      let claim = null, rest = seg;
+      if (seg[0] && seg[0].t === '(' && seg[0].auto) {          // a spoken fraction: "等于四分之一"
+        const j = seg.findIndex(t => t.t === ')' && t.auto);
+        if (j > 0) { claim = seg.slice(0, j + 1); rest = seg.slice(j + 1); }
+      } else if (seg[0] && seg[0].t === 'num') { claim = [seg[0]]; rest = seg.slice(1); }
+      steps.push({ tokens: pending, claim });
+      pending = rest[0] && rest[0].t === 'op' ? [{ t: 'num', v: null, prev: true }].concat(rest) : rest;
+    }
+    /* What is left after the last "=" counts only if it is a sum of its own; a repeated "二十四" is not. */
+    if (!steps.length || (hasNum(pending) && hasOp(pending))) steps.push({ tokens: pending, claim: null });
+    return steps;
+  }
+  const same = (a, b) => !!a && !!b && a.n === b.n && a.d === b.d;
+  /* A spoken fraction (auto brackets) becomes one number, so it can stand for an earlier result as well as two cards. */
+  function joinFractions(tokens) {
+    const out = [];
+    for (let k = 0; k < tokens.length; k++) {
+      const [a, b, c, d, e] = tokens.slice(k, k + 5);
+      if (a.t === '(' && a.auto && b && b.t === 'num' && c && c.t === 'op' && d && d.t === 'num' && e && e.t === ')' && e.auto) {
+        out.push({ t: 'num', v: b.v / d.v, f: frac(b.v, d.v), parts: [b.v, d.v] });
+        k += 4;
+      } else out.push(a);
+    }
+    return out;
+  }
+  const leaves = node => 'num' in node ? [node] : leaves(node.a).concat(leaves(node.b));
+  /* bracketings() for leaf nodes (numbers that may be fractions or earlier results). */
+  function bracketingsOf(nodes, ops) {
+    if (nodes.length === 1) return [nodes[0]];
+    const out = [];
+    for (let k = 0; k < ops.length; k++)
+      for (const a of bracketingsOf(nodes.slice(0, k + 1), ops.slice(0, k)))
+        for (const b of bracketingsOf(nodes.slice(k + 1), ops.slice(k + 1))) out.push({ op: ops[k], a, b });
+    return out;
+  }
+  function checkSteps(steps, values, heard) {
+    const pool = values.map(v => frac(v));
+    const done = [];
+    const take = f => { const k = pool.findIndex(p => same(p, f)); if (k < 0) return false; pool.splice(k, 1); return true; };
+    const shown = () => done.join('; ');
+    let prev = null;
+    for (let s = 0; s < steps.length; s++) {
+      const st = steps[s];
+      const tokens = joinFractions(st.tokens.map(t => t.prev ? Object.assign({}, t, { v: prev && prev.n / prev.d, f: prev }) : t));
+      if (tokens.some(t => t.prev && !t.f)) return { status: 'unclear', heard };
+      const flat = tokens.filter(t => t.t === 'num' || t.t === 'op');
+      let tree = parse(tokens), said = tokens.some(t => (t.t === '(' || t.t === ')') && !t.auto);
+      if (!tree && said) { tree = parse(flat); said = false; }  // brackets that do not pair up are ignored
+      if (!tree || 'num' in tree) return { status: 'unclear', heard };
+      let claim = st.claim ? evaluate(parse(joinFractions(st.claim))) : null;
+      let value = evaluate(tree);
+      /* "等于三，三乘以八" can come back as "= 33 × 8": a claim that starts with the step's result is that result, and
+         its other digits start the next step. */
+      if (claim && value && claim.d === 1 && value.d === 1 && value.n > 0 && !same(claim, value) && st.claim.length === 1 &&
+          steps[s + 1] && String(claim.n).startsWith(String(value.n))) {
+        const next = steps[s + 1];
+        next.tokens = [{ t: 'num', v: +String(claim.n).slice(String(value.n).length) }].concat(next.tokens.filter((t, i) => !(i === 0 && t.prev)));
+        claim = value;
+      }
+      if (claim && !same(claim, value) && !said) {
+        /* No brackets spoken in this step: accept a bracketing of the same order that gives the claimed result. */
+        const nodes = flat.filter(t => t.t === 'num').map(t => t.f ? { num: t.v, f: t.f, parts: t.parts } : { num: t.v });
+        const hit = bracketingsOf(nodes, flat.filter(t => t.t === 'op').map(t => t.v)).find(b => same(evaluate(b), claim));
+        if (hit) { tree = hit; value = claim; }
+      }
+      for (const leaf of leaves(tree)) {
+        if (leaf.f && take(leaf.f)) continue;                   // an earlier result, or a fraction kept as one number
+        if (leaf.parts ? take(frac(leaf.parts[0])) && take(frac(leaf.parts[1])) : !leaf.f && take(frac(leaf.num))) continue;
+        done.push(show(tree));
+        return { status: 'cards', heard, expr: shown(), steps: true };
+      }
+      if (!value || (claim && !same(claim, value))) {
+        done.push(show(tree));
+        return { status: 'wrong', heard, expr: shown(), value: value ? fracText(value) : null, claimed: claim ? fracText(claim) : null, steps: true };
+      }
+      done.push(show(tree) + ' = ' + fracText(value));
+      pool.push(value);
+      prev = value;
+    }
+    if (pool.length > 1) return { status: 'cards', heard, expr: shown(), steps: true };
+    if (isTarget(pool[0])) return { status: 'correct', heard, expr: shown(), value: '24', steps: true };
+    return { status: 'wrong', heard, expr: shown(), value: fracText(pool[0]), steps: true };
+  }
+
   /* The best verdict over the recogniser's alternatives: correct beats wrong beats cards beats unclear. */
   function checkAny(texts, values, mode = '13') {
     const rank = { correct: 0, wrong: 1, cards: 2, unclear: 3 };
     let best = null;
-    for (const t of texts) {
+    /* Each text as heard, then (Chinese) the same text with sound-alikes read as the words of a sum. */
+    const tries = texts.map(t => [t, t]).concat(texts.map(t => [soundAlike(t), t]).filter(([a, b]) => a !== String(b || '')));
+    for (const [t, orig] of tries) {
       const r = check(t, values, mode);
-      r.heard = String(t || '');
+      r.heard = String(orig || '');
       if (!best || rank[r.status] < rank[best.status]) best = r;
       if (r.status === 'correct') break;
     }
@@ -301,5 +417,5 @@
   }
 
   return { TARGET, RANKS, SUITS, DECK_MODES, frac, apply, fracText, rankValue, makeDeck, solve, deal,
-    tokenize, parse, evaluate, show, bracketings, check, checkAny };
+    tokenize, parse, evaluate, show, bracketings, check, checkAny, splitSteps, soundAlike };
 });

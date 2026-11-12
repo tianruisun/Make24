@@ -191,6 +191,46 @@ t('a fraction\'s own brackets do not count as said: 六除以一减四分之三 
 });
 t('"three quarters" reads as ( 3 ÷ 4 )', () => assert.deepStrictEqual(G.tokenize('three quarters').tokens.map(t => t.v || t.t), ['(', 3, '/', 4, ')']));
 
+/* ---------- R3: answers in steps, sound-alikes (Terry, 2026-11-13) ---------- */
+const S4 = [9, 6, 8, 1];
+const stepCase = (text, status, expr, values = S4) => t(`steps: ${text} → ${status}`, () => {
+  const r = G.checkAny([text], values);
+  assert.strictEqual(r.status, status, JSON.stringify(r));
+  if (expr) assert.strictEqual(r.expr, expr);
+});
+stepCase('9减6等于3，3乘以8等于24，24乘以1等于24', 'correct', '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24');
+stepCase('九减六等于三，三乘以八等于二十四，再乘以一等于二十四', 'correct', '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24');
+stepCase('9-6=3 3×8=24 24×1=24', 'correct');
+stepCase('9 minus 6 equals 3, 3 times 8 equals 24, 24 times 1 is 24', 'correct');
+stepCase('9减6等于3，乘以8等于24，乘1等于24', 'correct', '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24');   // goes on from the last result
+stepCase('8乘以1等于8，9减6等于3，3乘8等于24', 'correct', '8 × 1 = 8; 9 − 6 = 3; 3 × 8 = 24');     // any order
+stepCase('9减6等于33×8等于24 24×1等于24', 'correct', '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24');       // "3" and "3 × 8" run together
+stepCase('3除以4等于4分之3，1减4分之3等于4分之1，6除以4分之1等于24', 'correct', null, [6, 1, 3, 4]);   // fractions as results
+stepCase('9减6等于3，3乘以8等于24', 'cards', '9 − 6 = 3; 3 × 8 = 24');                         // the 1 is not used
+stepCase('9减6等于3，3乘以3等于9，9乘8乘1等于72', 'cards');                                    // a 3 that is no card nor result
+stepCase('8加8等于16，16加9减1等于24', 'cards');                                              // 6 left over
+stepCase('9加6等于15，15加8加1等于24', 'correct');
+stepCase('9加6等于15，15减8乘1等于7', 'wrong', '9 + 6 = 15; 15 − 8 × 1 = 7');
+stepCase('答案是九减六乘以八乘以一', 'correct', '(9 − 6) × 8 × 1');                           // "是" before the answer is not a step
+stepCase('(9-6)×8×1=24', 'correct', '(9 − 6) × 8 × 1');                                     // one step reads as before
+stepCase('(9-6)×8×1=24，二十四', 'correct', '(9 − 6) × 8 × 1');                             // a repeated result is no step
+t('steps: a wrong step names what it makes and what was claimed', () => {
+  const r = G.checkAny(['9减6等于4，4乘以8等于32'], S4);
+  assert.deepStrictEqual([r.status, r.value, r.claimed, r.expr], ['wrong', '3', '4', '9 − 6']);
+});
+t('steps: no brackets spoken in a step, a bracketing gives the claimed result: 9减6乘8等于24 → (9 − 6) × 8', () => {
+  const r = G.checkAny(['9减6乘8等于24，24乘1等于24'], S4);
+  assert.strictEqual(r.status, 'correct', JSON.stringify(r));
+});
+t('splitSteps: one "= 24" at the end is one step (a plain answer)', () => assert.strictEqual(G.splitSteps(G.tokenize('8除以3减8除以3等于24').tokens).length, 1));
+t('sound-alikes: 成 → 乘, 酒 → 九, 扩号 → 括号, 剪 → 减', () => assert.strictEqual(G.soundAlike('酒剪六成扩号'), '九减六乘括号'));
+t('sound-alikes are a second reading: 九减六成八成一 → correct, heard shows what was said', () => {
+  const r = G.checkAny(['九减六成八成一'], S4);
+  assert.deepStrictEqual([r.status, r.heard], ['correct', '九减六成八成一']);
+});
+t('sound-alikes never undo a right reading: 八除以括号三减八除以三括号 stays correct', () =>
+  assert.strictEqual(G.checkAny(['八除以括号三减八除以三括号'], [8, 3, 8, 3]).status, 'correct'));
+
 /* ---------- home-screen icons (R1.5) ---------- */
 t('apple-touch-icon and the manifest PNG icons exist, are PNGs of the right size, and are cached', () => {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');

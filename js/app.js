@@ -8,7 +8,7 @@
 
   const STR = {
     zh: {
-      start: '发牌', listen: '🎤 说答案', listening: '正在听…', nextPrimary: '下一手 ➜',
+      start: '发牌', listen: '🎤 说答案', listening: '正在听… 说完点这里', nextPrimary: '下一手 ➜',
       readAgain: '再读', keypad: '键盘', answer: '答案', next: '下一手', settings: '设置', language: '语言', faces: 'J Q K',
       mode13: 'J Q K = 11 12 13', mode10: 'J Q K = 10', modeNo: '去掉 J Q K', done: '好', close: '关闭', check: '检查',
       backspace: '删除', clear: '清空', langBtn: 'EN', langLabel: 'English',
@@ -16,6 +16,7 @@
       useCards: c => `要用这四张牌：${c}`, unclear: '没听清，请再说一遍', noMic: '这个浏览器不能听，请用键盘',
       micDenied: '没有麦克风权限，请用键盘', noSpeech: '没听到声音', micError: '听不到，请再试一次',
       kpUnclear: '算式还没写完整：检查运算符和括号',
+      stepWrong: (v, c) => `这一步不对：结果是 ${v}，不是 ${c}`,
       answerIs: '答案：', revealed: '下一手再来', bracketsAdded: '（已加上括号）', said: '听到：', scoreLabel: n => `答对 ${n} 题`,
       score: '成绩', resetScore: n => `清零（答对 ${n} 题）`, resetConfirm: n => `把答对的 ${n} 题清零？清零后不能恢复。`,
       voice: '语音', privacy: '听答案用的是浏览器自带的语音识别：Chrome 会把声音发给 Google，Safari 发给 Apple。',
@@ -23,7 +24,7 @@
       say: r => ({ A: 'A', J: 'J', Q: 'Q', K: 'K' }[r] || r), sep: '，', verbs: { '+': '加', '-': '减', '*': '乘', '/': '除以', '(': '括号', ')': '括号' }
     },
     en: {
-      start: 'Deal', listen: '🎤 Say answer', listening: 'Listening…', nextPrimary: 'Next hand ➜',
+      start: 'Deal', listen: '🎤 Say answer', listening: 'Listening… tap when done', nextPrimary: 'Next hand ➜',
       readAgain: 'Read again', keypad: 'Keypad', answer: 'Answer', next: 'Next', settings: 'Settings', language: 'Language', faces: 'J Q K',
       mode13: 'J Q K = 11 12 13', mode10: 'J Q K = 10', modeNo: 'No J Q K', done: 'Done', close: 'Close', check: 'Check',
       backspace: 'Delete', clear: 'Clear', langBtn: '中', langLabel: '中文',
@@ -31,6 +32,7 @@
       useCards: c => `Use these four cards: ${c}`, unclear: "Sorry, I didn't catch that", noMic: 'This browser cannot listen. Use the keypad.',
       micDenied: 'No microphone permission. Use the keypad.', noSpeech: 'No speech heard', micError: 'Could not listen, please try again',
       kpUnclear: 'Not a complete sum yet: check the operators and brackets',
+      stepWrong: (v, c) => `That step makes ${v}, not ${c}`,
       answerIs: 'Answer: ', revealed: 'Try the next hand', bracketsAdded: '(brackets added)', said: 'Heard: ', scoreLabel: n => `${n} solved`,
       score: 'Score', resetScore: n => `Reset (${n} solved)`, resetConfirm: n => `Reset your ${n} solved to 0? This cannot be undone.`,
       voice: 'Voice', privacy: "Answers are heard by the browser's own speech recognition: Chrome sends the sound to Google, Safari to Apple.",
@@ -96,35 +98,69 @@
   function sayParts(kind, parts) { setMessage(kind, parts); speak(msgText(parts)); }
 
   /* ---------- voice in ---------- */
+  /* Listening goes on through pauses (continuous), so an answer can be said in steps: "9 减 6 等于 3 … 3 乘以 8 等于 24".
+     It stops when the player taps, when what was heard already makes 24, or after a quiet spell. What was heard so far is
+     judged when it stops, final or not: Safari often ends without marking its last result final. */
   const Recognition = self.SpeechRecognition || self.webkitSpeechRecognition;
+  const QUIET_MS = 3500, DONE_MS = 700, NO_SPEECH_MS = 8000, MAX_MS = 45000;
   let rec = null;
+  /* The recogniser's results → alternatives per piece. Chrome on Android may repeat the earlier pieces inside a later
+     one; a piece that starts with the one before replaces it. */
+  function pieces(results) {
+    const list = [];
+    for (let i = 0; i < results.length; i++) {
+      const alts = Array.from(results[i]).map(a => String(a.transcript || '').trim()).filter(Boolean);
+      if (!alts.length) continue;
+      const prev = list[list.length - 1];
+      if (prev && alts[0].startsWith(prev[0])) list[list.length - 1] = alts;
+      else if (!(prev && prev[0].startsWith(alts[0]))) list.push(alts);
+    }
+    return list;
+  }
+  /* Texts to judge: the best guess of every piece, then each other guess of one piece with the best of the rest. */
+  function readings(list) {
+    const best = list.map(a => a[0]);
+    const out = [best.join(' ')];
+    list.forEach((alts, i) => alts.slice(1).forEach(alt => out.push(best.map((b, j) => j === i ? alt : b).join(' '))));
+    return out;
+  }
   function listen() {
     if (!Recognition) { setMessage('info', [['noMic']]); openKeypad(); return; }
     if (state.listening) { rec && rec.stop(); return; }
     if (self.speechSynthesis) self.speechSynthesis.cancel();   // never listen to our own voice
-    rec = new Recognition();
+    const me = rec = new Recognition();
+    const hand = state.hand;
     rec.lang = voiceLang();
     rec.interimResults = true;
     rec.maxAlternatives = 5;
-    rec.continuous = false;
-    let finalTexts = null;
+    rec.continuous = true;
+    let heard = [], timer = 0;
+    const stopSoon = ms => { clearTimeout(timer); timer = setTimeout(() => { try { me.stop(); } catch (e) { /* already stopped */ } }, ms); };
+    const maxTimer = setTimeout(() => stopSoon(0), MAX_MS);
     rec.onresult = e => {
-      const r = e.results[e.results.length - 1];
-      const texts = Array.from(r).map(a => a.transcript);
-      if (r.isFinal) finalTexts = texts;
-      else setView({ heard: tidy(texts[0]), live: true });
+      if (rec !== me) return;
+      heard = pieces(e.results);
+      if (!heard.length) return;
+      const texts = readings(heard);
+      setView({ heard: tidy(texts[0]), live: true });
+      const r = M.checkAny(texts, hand.map(c => c.value), settings.mode);
+      stopSoon(r.status === 'correct' ? DONE_MS : QUIET_MS);
     };
     rec.onerror = e => {
-      if (e.error === 'aborted') return;
+      if (rec !== me || e.error === 'aborted') return;
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { setMessage('info', [['micDenied']]); openKeypad(); return; }   // R1.3
-      setMessage('info', [[e.error === 'no-speech' ? 'noSpeech' : 'micError']]);
+      if (e.error !== 'no-speech' || !heard.length) setMessage('info', [[e.error === 'no-speech' ? 'noSpeech' : 'micError']]);
     };
     rec.onend = () => {
+      clearTimeout(timer); clearTimeout(maxTimer);
+      if (rec !== me) return;
+      rec = null;
       setListening(false);
-      if (finalTexts) judge(finalTexts);
+      if (heard.length && state.hand === hand) judge(readings(heard));
+      else if (!heard.length && !state.view.parts.length) setMessage('info', [['noSpeech']]);
     };
-    try { rec.start(); setListening(true); setView({}); }
-    catch (e) { setListening(false); setMessage('info', [['micError']]); }
+    try { rec.start(); setListening(true); setView({}); stopSoon(NO_SPEECH_MS); }
+    catch (e) { rec = null; clearTimeout(maxTimer); setListening(false); setMessage('info', [['micError']]); }
   }
   function setListening(on) {
     state.listening = on;
@@ -139,10 +175,13 @@
       state.done = true;
       stats.solved++;
       save('make24.stats', stats);
-      setView({ heard: r.expr + ' = 24', kind: 'correct', parts: r.bracketsAdded ? [['correct'], ['bracketsAdded']] : [['correct']] });
+      setView({ heard: r.steps ? r.expr : r.expr + ' = 24', kind: 'correct', parts: r.bracketsAdded ? [['correct'], ['bracketsAdded']] : [['correct']] });
       speak(T().correct);
+    } else if (r.status === 'wrong' && r.claimed != null && r.value != null) {
+      setView({ heard: r.expr + ' = ' + r.value });
+      sayParts('wrong', [['stepWrong', r.value, r.claimed]]);
     } else if (r.status === 'wrong') {
-      setView({ heard: r.expr + (r.value != null ? ' = ' + r.value : '') });
+      setView({ heard: r.expr + (r.value != null && !r.steps ? ' = ' + r.value : '') });
       sayParts('wrong', r.value != null ? [['wrongIs', r.value]] : [['wrongNone']]);
     } else if (r.status === 'cards') {
       setView({ heard: r.expr });
@@ -157,7 +196,7 @@
 
   /* ---------- dealing ---------- */
   function newHand() {
-    if (rec && state.listening) rec.abort();
+    if (rec && state.listening) { const r = rec; rec = null; r.abort(); setListening(false); }
     state.hand = M.deal(settings.mode);
     state.done = false;
     state.kp = [];

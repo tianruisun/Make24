@@ -1,7 +1,9 @@
 /* Browser flows: deal, read out, listen, judge, keypad, answer, settings, language, phone sizes.
    The browser's speech is replaced by a fake before the page loads: spoken text is recorded in window.__spoken, and
    the fake recogniser "hears" whatever the test puts in window.__nextHeard (a list of alternatives), or raises
-   window.__nextError. So the flows never need a microphone or a speaker, and run the same on Test and Production. */
+   window.__nextError. So the flows never need a microphone or a speaker, and run the same on Test and Production.
+   window.__script plays a continuous session like a real phone: each step comes "after" ms, with the recogniser's whole
+   result list so far ([[alternatives], ...], each marked final or not), and the session only ends when the app stops it. */
 const fs = require('fs'), os = require('os'), path = require('path');
 const { launch } = require('./smoke.js');
 
@@ -11,6 +13,7 @@ const SHOTS = path.join(os.tmpdir(), path.basename(ROOT) + '-tests');
 const FAKE_SPEECH = `
   window.__spoken = [];
   window.__nextHeard = null; window.__nextError = null; window.__recLang = null; window.__recStarts = 0;
+  window.__script = null; window.__recStops = 0; window.__recContinuous = null;
   class FakeUtterance { constructor(t) { this.text = t; } }
   window.SpeechSynthesisUtterance = FakeUtterance;
   Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
@@ -19,7 +22,17 @@ const FAKE_SPEECH = `
   }});
   class FakeRec {
     start() {
-      window.__recLang = this.lang; window.__recStarts++;
+      window.__recLang = this.lang; window.__recStarts++; window.__recContinuous = this.continuous;
+      if (window.__script) {
+        const script = window.__script; window.__script = null;
+        let at = 0;
+        this.__timers = script.map(step => setTimeout(() => {
+          if (this.__ended) return;
+          const results = step.results.map(alts => { const r = alts.map(t => ({ transcript: t })); r.isFinal = !!step.final; return r; });
+          this.onresult && this.onresult({ results });
+        }, at += step.after));
+        return;
+      }
       setTimeout(() => {
         if (window.__nextError) { const e = window.__nextError; window.__nextError = null; this.onerror && this.onerror({ error: e }); this.onend && this.onend(); return; }
         const alts = window.__nextHeard || [];
@@ -33,7 +46,9 @@ const FAKE_SPEECH = `
         this.onend && this.onend();
       }, 30);
     }
-    stop() {} abort() { this.onend && this.onend(); }
+    end() { if (this.__ended) return; this.__ended = true; (this.__timers || []).forEach(clearTimeout); this.onend && this.onend(); }
+    stop() { window.__recStops++; if (this.__timers) setTimeout(() => this.end(), 20); }
+    abort() { if (this.__timers) this.end(); else this.onend && this.onend(); }
   }
   window.SpeechRecognition = FakeRec; window.webkitSpeechRecognition = FakeRec;
 `;
@@ -119,6 +134,8 @@ async function run(site) {
     check('R1.4: and back to 中文', (await text(page, '#verdict')) === '不对，结果是 22', await text(page, '#verdict'));
 
     r = await say(page, '');
+    check('zh: an empty transcript → 没听到声音', r.verdict === '没听到声音', r);
+    r = await say(page, '嗯');
     check('zh: nothing understood → 没听清', r.verdict === '没听清，请再说一遍', r);
     r = await say(page, '8*3+');
     check('R1.8: unreadable text is shown with × ÷ like the rest of the page', r.heard === '听到：8×3+' && r.verdict === '没听清，请再说一遍', r);
@@ -273,6 +290,68 @@ async function run(site) {
     ({ context, page, errors } = await open({ storage: { 'make24.settings': '{oops', 'make24.stats': 'null' } }));
     check('damaged settings: page still opens with 发牌', (await text(page, '#primaryBtn')) === '发牌');
     check('damaged settings: no page errors', errors.length === 0, errors);
+    await context.close();
+
+    /* ---------- R3: answers in steps, with pauses (Terry, 2026-11-13) ---------- */
+    ({ context, page, errors } = await open({ lang: 'zh-CN' }));
+    async function play(page, script, { tapAfter = 0 } = {}) {
+      await page.evaluate(sc => { window.__script = sc; }, script);
+      await page.click('#primaryBtn');
+      if (tapAfter) { await page.waitForTimeout(tapAfter); await page.click('#primaryBtn'); }
+      const t0 = Date.now();
+      await page.waitForFunction(() => !window.Make24App.state.listening, null, { timeout: 15000 });
+      await page.waitForTimeout(50);
+      return Object.assign(await page.evaluate(() => ({
+        heard: document.getElementById('heard').textContent, verdict: document.getElementById('verdict').textContent,
+        spoken: window.__spoken.map(s => s.text), continuous: window.__recContinuous
+      })), { ms: Date.now() - t0 });
+    }
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']]);
+    r = await play(page, [
+      { after: 100, results: [['9减6等于3']], final: false },
+      { after: 100, results: [['9减6等于3']], final: true },
+      { after: 2000, results: [['9减6等于3'], ['3乘以8等于24']], final: false },     // a 2-second pause between steps
+      { after: 100, results: [['9减6等于3'], ['3乘以8等于24，再乘以1等于24']], final: true }
+    ]);
+    check('R3: listening is continuous', r.continuous === true, r.continuous);
+    check('R3: "9减6等于3 … 3乘以8等于24，再乘以1" after a pause → 对了', r.verdict === '对了！' && r.heard === '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24', r);
+    check('R3: a right answer ends listening by itself, soon after', r.ms < 4500, r.ms);
+
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']]);
+    r = await play(page, [
+      { after: 100, results: [['九减六等于四']], final: true },
+      { after: 300, results: [['九减六等于四'], ['四乘以八乘一等于三十二']], final: true }
+    ]);
+    check('R3: a wrong step is named: 这一步不对：结果是 3，不是 4', r.verdict === '这一步不对：结果是 3，不是 4' && r.heard === '9 − 6 = 3', r);
+    check('R3: and it is spoken', r.spoken[r.spoken.length - 1] === '这一步不对：结果是 3，不是 4', r.spoken.slice(-1));
+    check('R3: an unfinished answer waits for a quiet spell (about 3.5 s) before judging', r.ms >= 3000 && r.ms < 6000, r.ms);
+
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']]);
+    r = await play(page, [
+      { after: 100, results: [['九减六']], final: false },
+      { after: 200, results: [['九减六成八成一']], final: false }               // never marked final (Safari)
+    ], { tapAfter: 450 });
+    check('R3: Safari-style results never marked final are still judged when the player taps', r.verdict.startsWith('对了'), r);
+    check('R3: sound-alike 成 is read as 乘', r.heard.startsWith('(9 − 6) × 8 × 1'), r.heard);
+
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']]);
+    r = await play(page, [
+      { after: 100, results: [['9减6等于3']], final: true },
+      { after: 300, results: [['9减6等于3'], ['9减6等于3 3乘8等于24 乘1等于24']], final: true }   // Chrome on Android repeats
+    ]);
+    check('R3: a piece that repeats the earlier one is not counted twice', r.verdict === '对了！' && r.heard === '9 − 6 = 3; 3 × 8 = 24; 24 × 1 = 24', r);
+
+    await forceHand(page, [['9', '♠'], ['6', '♥'], ['8', '♣'], ['A', '♦']]);
+    await page.evaluate(() => { window.__script = [{ after: 100, results: [['九减六乘以八乘以一']], final: false }]; });
+    await page.click('#primaryBtn');
+    check('R3: the button says how to stop: 正在听… 说完点这里', (await text(page, '#primaryBtn')) === '正在听… 说完点这里', await text(page, '#primaryBtn'));
+    await page.waitForTimeout(50);
+    await page.click('#nextBtn');
+    await page.waitForTimeout(1200);
+    check('R3: a new hand while listening stops it, and nothing is judged on the new hand',
+      !(await page.evaluate(() => window.Make24App.state.listening)) && (await text(page, '#verdict')) === '' && (await text(page, '#score')) === '✓ 3', await text(page, '#verdict'));
+
+    check('R3: no page errors', errors.length === 0, errors);
     await context.close();
 
     /* ---------- phone sizes ---------- */
