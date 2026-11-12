@@ -7,7 +7,7 @@ Make 24 (24点): the classic Chinese card game. The phone deals and reads out fo
 - Production: https://tianrui-make24.pages.dev   (branch main)
 - Test:       https://test.tianrui-make24.pages.dev   (branch test)
 - Cloudflare Pages project name `tianrui-make24` (make24.pages.dev is taken). Not created yet: Terry does NEW_REPO_SETUP.md Part 2.
-- GitHub: https://github.com/tianruisun/Make24 (public). Local folder: D:VibeCodingProjectsTerence_Sun_Make24.
+- GitHub: https://github.com/tianruisun/Make24 (public). Local folder: `D:VibeCodingProjectsTerence_Sun_Make24`.
 
 ## Tech
 - Plain HTML/CSS/JS, no build step. Cloudflare build settings: preset None, no build command, output `/`.
